@@ -11,8 +11,8 @@ export const EVENT_HIT = 1;
 export const EVENT_COIN = 2;
 export const EVENT_OVER = 4;
 
-function overlaps(a, b) {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+function overlaps(first, second) {
+  return first.x < second.x + second.width && first.x + first.width > second.x && first.y < second.y + second.height && first.y + first.height > second.y;
 }
 
 export function createWorld(random) {
@@ -72,20 +72,20 @@ export function createWorld(random) {
    * One fixed step. `direction` is -1, 0 or 1 (left, still, right). With `harmless` set (the title
    * screen's backdrop) things fall but nothing touches the player and nothing scores.
    */
-  function step(dt, direction, harmless) {
+  function step(delta, direction, harmless) {
     let events = 0;
-    state.elapsed += dt;
+    state.elapsed += delta;
     state.level = Math.min(LEVEL.max, 1 + Math.floor(state.elapsed / LEVEL.seconds));
 
-    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * dt));
-    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - dt);
+    player.x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * delta));
+    if (player.invulnerable > 0) player.invulnerable = Math.max(0, player.invulnerable - delta);
 
-    state.blockTimer -= dt;
+    state.blockTimer -= delta;
     if (state.blockTimer <= 0) {
       spawnBlock();
       state.blockTimer += blockInterval();
     }
-    state.coinTimer -= dt;
+    state.coinTimer -= delta;
     if (state.coinTimer <= 0) {
       spawnCoin();
       state.coinTimer += COIN.interval + random() * COIN.intervalJitter;
@@ -94,7 +94,7 @@ export function createWorld(random) {
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       if (!item.active) continue;
-      item.y += item.speed * dt;
+      item.y += item.speed * delta;
       if (item.y > FIELD.groundY) {
         item.active = false;
         if (item.kind === KIND_BLOCK && !harmless) state.score += BLOCK.dodgePoints;

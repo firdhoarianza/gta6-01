@@ -20,17 +20,19 @@ const SAMPLE = 1 / 30;
 const DIRECTIONS = [0, -1, 1];
 /** Extra room, each side, it keeps between the paddle and a block. */
 const MARGIN = 10;
+/** How far off-centre the target must be before the autopilot bothers moving. */
+const TARGET_DEAD_ZONE = 8;
 
 /** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
 function timeToHit(state, direction, horizon) {
   const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
+  for (let sampleTime = SAMPLE; sampleTime <= horizon; sampleTime += SAMPLE) {
+    const projectedX = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * sampleTime));
     for (let index = 0; index < state.items.length; index += 1) {
       const item = state.items[index];
       if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
+      const projectedY = item.y + item.speed * sampleTime;
+      if (projectedY + item.height > player.y && projectedY < player.y + player.height && item.x < projectedX + player.width + MARGIN && item.x + item.width > projectedX - MARGIN) return sampleTime;
     }
   }
   return Infinity;
@@ -46,17 +48,17 @@ function autopilot(state, horizon) {
   }
   const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
   const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
+  const desiredDirection = target > centre + TARGET_DEAD_ZONE ? 1 : target < centre - TARGET_DEAD_ZONE ? -1 : 0;
+  let bestDirection = desiredDirection;
+  let bestTime = timeToHit(state, desiredDirection, horizon);
   for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
     const time = timeToHit(state, DIRECTIONS[index], horizon);
     if (time > bestTime) {
       bestTime = time;
-      best = DIRECTIONS[index];
+      bestDirection = DIRECTIONS[index];
     }
   }
-  return best;
+  return bestDirection;
 }
 
 /**

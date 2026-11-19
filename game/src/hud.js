@@ -8,11 +8,51 @@ import { CITY } from './config.js';
 const TAU = Math.PI * 2;
 const MAP_UNITS = 470;
 const MAP_PX = 940;          // world raster: 2 px per world unit
-const MS = MAP_PX / MAP_UNITS;
+const MAP_SCALE = MAP_PX / MAP_UNITS;
 const MINI_VIEW = 200;       // world units across the round minimap
+const MINI_PX = 220;         // minimap canvas size in pixels
+const MINI_CENTER = MINI_PX / 2;
+const MINI_CLIP_RADIUS = 109;
+const MINI_BLIP_RADIUS = 102;
+const MINI_MARKER_CLAMP = 96;
+const MINI_WANTED_RADIUS = 105;
+const ATLAS_PX = 594;        // full atlas canvas size in pixels
+const DISTRICT_EDGE = 105;   // district boundaries along x/z
+const DOWNTOWN_HALF = 65;
+const DOWNTOWN_CORE = 60;
+const BLOCK_HALF = 17;       // half of CITY.block: cell centre offset
+const ROAD_LIMIT = 6;        // road lines run from -6..6
+const RASTER_EDGE = 238;     // district cells past this are sea
+const SEA_Z = -230;
+const BEACH_Z = -222;
+const SEGMENT_COUNT = 14;
+const LOW_HEALTH = 30;
+const KMH_PER_UNIT = 3.6;
+const MAX_STARS = 5;
+const STORY_TOTAL = 6;
+const SIDE_MISSION_START = 6;
+const TOAST_DEDUPE_MS = 1200;
+const TOAST_LIFETIME_MS = 6300;
+const MAX_TOASTS = 3;
+const SLOW_LANE_MS = 100;    // 10 Hz for the map, clock, distance
+const MINIMAP_MS = 95;
+const BIGMAP_MS = 260;
+const MAX_HUD_DELTA = 0.06;
+const DEFAULT_HUD_DELTA = 0.016;
+const MINUTES_PER_DAY = 1440;
+const FALLBACK_CLOCK_MINUTES = 21 * 60 + 4;
+const FALLBACK_CLOCK_TICK_MS = 4000;
+const KM_THRESHOLD = 999;
+const METERS_PER_KM = 1000;
+const LOW_TIME_SECONDS = 10;
+const BLIP_FLASH_MS = 220;
+const ATLAS_FLASH_MS = 260;
+const ATLAS_LABEL_FLIP_MARGIN = 100;
+const PATCH_MAX_TRIES = 40;
+const PATCH_RETRY_MS = 250;
 
-const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-const fmt = (n) => Math.round(n).toLocaleString('en-US');
+const clamp = (value, min, max) => (value < min ? min : value > max ? max : value);
+const fmt = (value) => Math.round(value).toLocaleString('en-US');
 
 const DISTRICTS = [
   { name: 'DOWNTOWN', color: '#3d5752' },
@@ -29,21 +69,21 @@ const WEAPONS = ['PISTOL', 'SMG', 'SHOTGUN'];
 const STATIONS = ['COAST FM', 'NIGHT DRIVE', 'SUNSET SOUL'];
 
 export function districtAt(position) {
-  const x = position.x, z = position.z;
-  if (x < -105) return 'THE DOCKS';
-  if (z > 105) return 'SUBURBS';
-  if (x > 105) return 'INDUSTRIAL';
-  if (z < -105) return 'BEACH PARK';
-  if (Math.abs(x) < 65 && Math.abs(z) < 65) return 'DOWNTOWN';
+  const positionX = position.x, positionZ = position.z;
+  if (positionX < -DISTRICT_EDGE) return 'THE DOCKS';
+  if (positionZ > DISTRICT_EDGE) return 'SUBURBS';
+  if (positionX > DISTRICT_EDGE) return 'INDUSTRIAL';
+  if (positionZ < -DISTRICT_EDGE) return 'BEACH PARK';
+  if (Math.abs(positionX) < DOWNTOWN_HALF && Math.abs(positionZ) < DOWNTOWN_HALF) return 'DOWNTOWN';
   return 'LITTLE HAVANA';
 }
 
-function districtIndex(x, z) {
-  if (x < -105) return 1;
-  if (z > 105) return 2;
-  if (x > 105) return 3;
-  if (z < -105) return 4;
-  if (Math.abs(x) < 60) return 0;
+function districtIndex(positionX, positionZ) {
+  if (positionX < -DISTRICT_EDGE) return 1;
+  if (positionZ > DISTRICT_EDGE) return 2;
+  if (positionX > DISTRICT_EDGE) return 3;
+  if (positionZ < -DISTRICT_EDGE) return 4;
+  if (Math.abs(positionX) < DOWNTOWN_CORE) return 0;
   return 5;
 }
 
@@ -219,145 +259,145 @@ let last = { player: null, police: null, mission: null };
 
 // ---------------------------------------------------------------- world raster
 function buildWorld() {
-  const cv = document.createElement('canvas');
-  cv.width = MAP_PX;
-  cv.height = MAP_PX;
-  const g = cv.getContext('2d');
-  const X = (x) => (x + MAP_UNITS / 2) * MS;
-  const Y = (z) => (z + MAP_UNITS / 2) * MS;
+  const canvas = document.createElement('canvas');
+  canvas.width = MAP_PX;
+  canvas.height = MAP_PX;
+  const ctx = canvas.getContext('2d');
+  const toRasterX = (worldX) => (worldX + MAP_UNITS / 2) * MAP_SCALE;
+  const toRasterY = (worldZ) => (worldZ + MAP_UNITS / 2) * MAP_SCALE;
 
-  g.fillStyle = '#313833';
-  g.fillRect(0, 0, MAP_PX, MAP_PX);
+  ctx.fillStyle = '#313833';
+  ctx.fillRect(0, 0, MAP_PX, MAP_PX);
 
   // District-tinted blocks. Cell centres are the same 34-unit grid city.js builds on.
-  for (let gx = -7; gx <= 7; gx++) {
-    for (let gz = -7; gz <= 7; gz++) {
-      const cx = gx * CITY.block + 17;
-      const cz = gz * CITY.block + 17;
-      if (Math.abs(cx) > 238 || Math.abs(cz) > 238) continue;
-      const d = districtIndex(cx, cz);
-      g.fillStyle = DISTRICTS[d].color;
-      g.fillRect(X(cx - 17), Y(cz - 17), 34 * MS, 34 * MS);
+  for (let gridX = -7; gridX <= 7; gridX++) {
+    for (let gridZ = -7; gridZ <= 7; gridZ++) {
+      const cellX = gridX * CITY.block + BLOCK_HALF;
+      const cellZ = gridZ * CITY.block + BLOCK_HALF;
+      if (Math.abs(cellX) > RASTER_EDGE || Math.abs(cellZ) > RASTER_EDGE) continue;
+      const districtIdx = districtIndex(cellX, cellZ);
+      ctx.fillStyle = DISTRICTS[districtIdx].color;
+      ctx.fillRect(toRasterX(cellX - BLOCK_HALF), toRasterY(cellZ - BLOCK_HALF), CITY.block * MAP_SCALE, CITY.block * MAP_SCALE);
     }
   }
 
   // Carriageways.
-  g.fillStyle = ROAD_COLOR;
-  for (let n = -6; n <= 6; n++) {
-    const v = n * CITY.block;
-    g.fillRect(X(v) - (CITY.road * MS) / 2, 0, CITY.road * MS, MAP_PX);
-    g.fillRect(0, Y(v) - (CITY.road * MS) / 2, MAP_PX, CITY.road * MS);
+  ctx.fillStyle = ROAD_COLOR;
+  for (let roadIndex = -ROAD_LIMIT; roadIndex <= ROAD_LIMIT; roadIndex++) {
+    const roadCoord = roadIndex * CITY.block;
+    ctx.fillRect(toRasterX(roadCoord) - (CITY.road * MAP_SCALE) / 2, 0, CITY.road * MAP_SCALE, MAP_PX);
+    ctx.fillRect(0, toRasterY(roadCoord) - (CITY.road * MAP_SCALE) / 2, MAP_PX, CITY.road * MAP_SCALE);
   }
   // Soft kerbs.
-  g.strokeStyle = 'rgba(16,22,20,.35)';
-  g.lineWidth = 1;
-  for (let n = -6; n <= 6; n++) {
-    const v = n * CITY.block;
-    g.beginPath();
-    g.moveTo(X(v) - (CITY.road * MS) / 2, 0);
-    g.lineTo(X(v) - (CITY.road * MS) / 2, MAP_PX);
-    g.moveTo(X(v) + (CITY.road * MS) / 2, 0);
-    g.lineTo(X(v) + (CITY.road * MS) / 2, MAP_PX);
-    g.moveTo(0, Y(v) - (CITY.road * MS) / 2);
-    g.lineTo(MAP_PX, Y(v) - (CITY.road * MS) / 2);
-    g.moveTo(0, Y(v) + (CITY.road * MS) / 2);
-    g.lineTo(MAP_PX, Y(v) + (CITY.road * MS) / 2);
-    g.stroke();
+  ctx.strokeStyle = 'rgba(16,22,20,.35)';
+  ctx.lineWidth = 1;
+  for (let roadIndex = -ROAD_LIMIT; roadIndex <= ROAD_LIMIT; roadIndex++) {
+    const roadCoord = roadIndex * CITY.block;
+    ctx.beginPath();
+    ctx.moveTo(toRasterX(roadCoord) - (CITY.road * MAP_SCALE) / 2, 0);
+    ctx.lineTo(toRasterX(roadCoord) - (CITY.road * MAP_SCALE) / 2, MAP_PX);
+    ctx.moveTo(toRasterX(roadCoord) + (CITY.road * MAP_SCALE) / 2, 0);
+    ctx.lineTo(toRasterX(roadCoord) + (CITY.road * MAP_SCALE) / 2, MAP_PX);
+    ctx.moveTo(0, toRasterY(roadCoord) - (CITY.road * MAP_SCALE) / 2);
+    ctx.lineTo(MAP_PX, toRasterY(roadCoord) - (CITY.road * MAP_SCALE) / 2);
+    ctx.moveTo(0, toRasterY(roadCoord) + (CITY.road * MAP_SCALE) / 2);
+    ctx.lineTo(MAP_PX, toRasterY(roadCoord) + (CITY.road * MAP_SCALE) / 2);
+    ctx.stroke();
   }
   // Centre dashes.
-  g.strokeStyle = 'rgba(244,232,203,.36)';
-  g.lineWidth = 1;
-  g.setLineDash([5, 9]);
-  for (let n = -6; n <= 6; n++) {
-    const v = n * CITY.block;
-    g.beginPath();
-    g.moveTo(X(v), 0);
-    g.lineTo(X(v), MAP_PX);
-    g.moveTo(0, Y(v));
-    g.lineTo(MAP_PX, Y(v));
-    g.stroke();
+  ctx.strokeStyle = 'rgba(244,232,203,.36)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 9]);
+  for (let roadIndex = -ROAD_LIMIT; roadIndex <= ROAD_LIMIT; roadIndex++) {
+    const roadCoord = roadIndex * CITY.block;
+    ctx.beginPath();
+    ctx.moveTo(toRasterX(roadCoord), 0);
+    ctx.lineTo(toRasterX(roadCoord), MAP_PX);
+    ctx.moveTo(0, toRasterY(roadCoord));
+    ctx.lineTo(MAP_PX, toRasterY(roadCoord));
+    ctx.stroke();
   }
-  g.setLineDash([]);
+  ctx.setLineDash([]);
 
   // Sea and beach at z < -230.
-  const seaY = Y(-230);
-  g.fillStyle = '#0e2e37';
-  g.fillRect(0, 0, MAP_PX, seaY);
-  g.fillStyle = '#6c6045';
-  g.fillRect(0, seaY, MAP_PX, Y(-222) - seaY);
-  g.strokeStyle = 'rgba(240,230,200,.4)';
-  g.lineWidth = 1.5;
-  g.beginPath();
-  g.moveTo(0, seaY);
-  g.lineTo(MAP_PX, seaY);
-  g.stroke();
-  g.strokeStyle = 'rgba(160,216,222,.12)';
-  g.lineWidth = 1;
-  for (let i = 0; i < 6; i++) {
-    const y = 2 + i * 1.6;
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(MAP_PX, y);
-    g.stroke();
+  const seaY = toRasterY(SEA_Z);
+  ctx.fillStyle = '#0e2e37';
+  ctx.fillRect(0, 0, MAP_PX, seaY);
+  ctx.fillStyle = '#6c6045';
+  ctx.fillRect(0, seaY, MAP_PX, toRasterY(BEACH_Z) - seaY);
+  ctx.strokeStyle = 'rgba(240,230,200,.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, seaY);
+  ctx.lineTo(MAP_PX, seaY);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(160,216,222,.12)';
+  ctx.lineWidth = 1;
+  for (let waveIndex = 0; waveIndex < 6; waveIndex++) {
+    const waveY = 2 + waveIndex * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(0, waveY);
+    ctx.lineTo(MAP_PX, waveY);
+    ctx.stroke();
   }
 
   // Buildings — same footprints city.js generates.
-  for (let gx = -6; gx <= 6; gx++) {
-    for (let gz = -6; gz <= 6; gz++) {
-      const x = gx * CITY.block + 17;
-      const z = gz * CITY.block + 17;
-      if (Math.abs(x) > 220 || z > 210 || z < -210) continue;
-      if (Math.abs(gx) < 1 && Math.abs(gz) < 1) continue;
-      const seed = Math.abs(gx * 71 + gz * 113 + 991);
-      const w = 12 + (seed % 8);
-      const dep = 12 + ((seed * 7) % 9);
-      const d = districtIndex(x, z);
-      g.fillStyle = BUILDING_COLORS[seed % BUILDING_COLORS.length];
-      g.fillRect(X(x) - (w * MS) / 2, Y(z) - (dep * MS) / 2, w * MS, dep * MS);
-      g.strokeStyle = 'rgba(236,240,222,.13)';
-      g.lineWidth = 1;
-      g.strokeRect(X(x) - (w * MS) / 2, Y(z) - (dep * MS) / 2, w * MS, dep * MS);
-      if (d === 2 || d === 4) {
-        g.fillStyle = 'rgba(64,104,78,.85)';
-        for (let t = 0; t < 3; t++) {
-          g.beginPath();
-          g.arc(X(x + w / 2 + 1) + Math.cos(t * 2.1) * 3, Y(z + w / 3) + Math.sin(t * 2.1) * 3, 2.1, 0, TAU);
-          g.fill();
+  for (let gridX = -ROAD_LIMIT; gridX <= ROAD_LIMIT; gridX++) {
+    for (let gridZ = -ROAD_LIMIT; gridZ <= ROAD_LIMIT; gridZ++) {
+      const buildingX = gridX * CITY.block + BLOCK_HALF;
+      const buildingZ = gridZ * CITY.block + BLOCK_HALF;
+      if (Math.abs(buildingX) > 220 || buildingZ > 210 || buildingZ < -210) continue;
+      if (Math.abs(gridX) < 1 && Math.abs(gridZ) < 1) continue;
+      const seed = Math.abs(gridX * 71 + gridZ * 113 + 991);
+      const width = 12 + (seed % 8);
+      const depth = 12 + ((seed * 7) % 9);
+      const districtIdx = districtIndex(buildingX, buildingZ);
+      ctx.fillStyle = BUILDING_COLORS[seed % BUILDING_COLORS.length];
+      ctx.fillRect(toRasterX(buildingX) - (width * MAP_SCALE) / 2, toRasterY(buildingZ) - (depth * MAP_SCALE) / 2, width * MAP_SCALE, depth * MAP_SCALE);
+      ctx.strokeStyle = 'rgba(236,240,222,.13)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(toRasterX(buildingX) - (width * MAP_SCALE) / 2, toRasterY(buildingZ) - (depth * MAP_SCALE) / 2, width * MAP_SCALE, depth * MAP_SCALE);
+      if (districtIdx === 2 || districtIdx === 4) {
+        ctx.fillStyle = 'rgba(64,104,78,.85)';
+        for (let treeIndex = 0; treeIndex < 3; treeIndex++) {
+          ctx.beginPath();
+          ctx.arc(toRasterX(buildingX + width / 2 + 1) + Math.cos(treeIndex * 2.1) * 3, toRasterY(buildingZ + width / 3) + Math.sin(treeIndex * 2.1) * 3, 2.1, 0, TAU);
+          ctx.fill();
         }
       }
     }
   }
 
   // Causeway over the water — a landmark and a route off the beach.
-  g.fillStyle = ROAD_COLOR;
-  g.fillRect(X(-34) - (CITY.road * MS) / 2, 0, CITY.road * MS, Y(-204) + 4);
-  g.strokeStyle = 'rgba(20,26,24,.5)';
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(X(-34) - (CITY.road * MS) / 2, 0);
-  g.lineTo(X(-34) - (CITY.road * MS) / 2, Y(-204));
-  g.moveTo(X(-34) + (CITY.road * MS) / 2, 0);
-  g.lineTo(X(-34) + (CITY.road * MS) / 2, Y(-204));
-  g.stroke();
+  ctx.fillStyle = ROAD_COLOR;
+  ctx.fillRect(toRasterX(-34) - (CITY.road * MAP_SCALE) / 2, 0, CITY.road * MAP_SCALE, toRasterY(-204) + 4);
+  ctx.strokeStyle = 'rgba(20,26,24,.5)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(toRasterX(-34) - (CITY.road * MAP_SCALE) / 2, 0);
+  ctx.lineTo(toRasterX(-34) - (CITY.road * MAP_SCALE) / 2, toRasterY(-204));
+  ctx.moveTo(toRasterX(-34) + (CITY.road * MAP_SCALE) / 2, 0);
+  ctx.lineTo(toRasterX(-34) + (CITY.road * MAP_SCALE) / 2, toRasterY(-204));
+  ctx.stroke();
 
   // Coastline re-stroke to sit above the bridge.
-  g.strokeStyle = 'rgba(240,230,200,.4)';
-  g.lineWidth = 1.5;
-  g.beginPath();
-  g.moveTo(0, seaY);
-  g.lineTo(MAP_PX, seaY);
-  g.stroke();
+  ctx.strokeStyle = 'rgba(240,230,200,.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, seaY);
+  ctx.lineTo(MAP_PX, seaY);
+  ctx.stroke();
 
-  return cv;
+  return canvas;
 }
 
 // ---------------------------------------------------------------- DOM
-function seg(n, bank) {
-  for (let i = 0; i < n; i++) {
-    const s = document.createElement('i');
-    bank.push(s);
+function seg(count, bank) {
+  for (let segIndex = 0; segIndex < count; segIndex++) {
+    const segment = document.createElement('i');
+    bank.push(segment);
   }
-  return bank.map((el) => el.outerHTML).join('') || '';
+  return bank.map((element) => element.outerHTML).join('') || '';
 }
 
 function build() {
@@ -385,15 +425,15 @@ function build() {
         </div>
         <div class="sb-car" id="sbride">ON FOOT<span>SHIFT TO SPRINT</span></div>
       </div>`;
-    const hs = hud.querySelector('#sbhseg');
-    const as = hud.querySelector('#sbaseg');
-    for (let i = 0; i < 14; i++) {
-      const h = document.createElement('i');
-      const a = document.createElement('i');
-      hs.appendChild(h);
-      as.appendChild(a);
-      segmentBanks.hp.push(h);
-      segmentBanks.ap.push(a);
+    const healthSegs = hud.querySelector('#sbhseg');
+    const armorSegs = hud.querySelector('#sbaseg');
+    for (let segIndex = 0; segIndex < SEGMENT_COUNT; segIndex++) {
+      const healthSeg = document.createElement('i');
+      const armorSeg = document.createElement('i');
+      healthSegs.appendChild(healthSeg);
+      armorSegs.appendChild(armorSeg);
+      segmentBanks.hp.push(healthSeg);
+      segmentBanks.ap.push(armorSeg);
     }
   }
 
@@ -505,11 +545,11 @@ function build() {
   els.mmTime = document.querySelector('#sbmmtime');
   els.joblog = document.querySelector('#sbjoblog');
 
-  for (let i = 0; i < 5; i++) {
-    const s = document.createElement('span');
-    s.className = 'sb-star';
-    s.textContent = '★';
-    els.starRow.appendChild(s);
+  for (let starIndex = 0; starIndex < MAX_STARS; starIndex++) {
+    const star = document.createElement('span');
+    star.className = 'sb-star';
+    star.textContent = '★';
+    els.starRow.appendChild(star);
   }
 
   if (els.mm) miniCtx = els.mm.getContext('2d');
@@ -519,11 +559,11 @@ function build() {
   patchSolara();
 }
 
-function txt(el, value) {
-  if (!el) return;
-  if (el.__t !== value) {
-    el.__t = value;
-    el.textContent = value;
+function txt(element, value) {
+  if (!element) return;
+  if (element.__cachedText !== value) {
+    element.__cachedText = value;
+    element.textContent = value;
   }
 }
 
@@ -532,42 +572,42 @@ function notify(text, kind) {
   if (!text) return;
   const now = performance.now();
   const lastOne = toasts[toasts.length - 1];
-  if (lastOne && lastOne.text === text && now - lastOne.at < 1200) return;
+  if (lastOne && lastOne.text === text && now - lastOne.at < TOAST_DEDUPE_MS) return;
   const hot = kind === 'hot' || /WANTED|BUSTED|FAILED|ROADBLOCK|AIR SUPPORT|WRECK|DIED|EXPIRED/i.test(text);
   const cool = kind === 'cool' || /COMPLETE|RETRY|JOB|HEAT LOST/i.test(text);
   toasts.push({ id: ++toastSeq, text, at: now, hot, cool });
-  while (toasts.length > 3) toasts.shift();
+  while (toasts.length > MAX_TOASTS) toasts.shift();
 }
 
 function renderToasts() {
   if (!els.toasts) return;
   const now = performance.now();
-  while (toasts.length && now - toasts[0].at > 6300) toasts.shift();
-  const key = toasts.map((t) => t.id).join(',');
+  while (toasts.length && now - toasts[0].at > TOAST_LIFETIME_MS) toasts.shift();
+  const key = toasts.map((toast) => toast.id).join(',');
   if (cache.toasts === key) return;
   cache.toasts = key;
-  els.toasts.innerHTML = toasts.map((t) => {
-    const kind = t.hot ? 'hot' : t.cool ? 'cool' : '';
-    const stamp = t.hot ? 'ALERT' : t.cool ? 'LOG' : 'CITY';
-    return `<div class="sb-toast ${kind}"><span>${stamp}</span>${t.text}</div>`;
+  els.toasts.innerHTML = toasts.map((toast) => {
+    const kind = toast.hot ? 'hot' : toast.cool ? 'cool' : '';
+    const stamp = toast.hot ? 'ALERT' : toast.cool ? 'LOG' : 'CITY';
+    return `<div class="sb-toast ${kind}"><span>${stamp}</span>${toast.text}</div>`;
   }).join('');
 }
 
 // ---------------------------------------------------------------- key handling
 function installKeys() {
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
+  window.addEventListener('keydown', (event) => {
+    if (event.repeat) return;
     const menu = document.querySelector('#menu');
     if (!menu || menu.style.display !== 'none') return;
-    if (e.code === 'Tab') {
-      e.preventDefault();
+    if (event.code === 'Tab') {
+      event.preventDefault();
       toggleMap();
-    } else if (e.code === 'KeyP') {
+    } else if (event.code === 'KeyP') {
       // main.js owns the real pause; this only mirrors it so the help card matches.
       mainPaused = !mainPaused;
       if (mapOpen) setMap(false);
       syncOverlays();
-    } else if (e.code === 'Escape') {
+    } else if (event.code === 'Escape') {
       mainPaused = !mainPaused;
       if (mapOpen) setMap(false);
       syncOverlays();
@@ -594,10 +634,10 @@ function refreshJobLog() {
     els.joblog.innerHTML = '<div class="sb-logrow"><b>NO JOBS ON FILE</b><em>—</em></div>';
     return;
   }
-  els.joblog.innerHTML = rows.map((r) => {
-    const cls = r.status === 'COMPLETE' ? 'done' : r.status === 'FAILED' ? 'fail' : '';
-    const fix = r.status === 'COMPLETE' ? `+${r.reward} CR` : r.status;
-    return `<div class="sb-logrow"><b>${r.title}</b><em class="${cls}">${fix}</em></div>`;
+  els.joblog.innerHTML = rows.map((row) => {
+    const statusClass = row.status === 'COMPLETE' ? 'done' : row.status === 'FAILED' ? 'fail' : '';
+    const rewardLabel = row.status === 'COMPLETE' ? `+${row.reward} CR` : row.status;
+    return `<div class="sb-logrow"><b>${row.title}</b><em class="${statusClass}">${rewardLabel}</em></div>`;
   }).join('');
 }
 
@@ -624,127 +664,127 @@ function patchSolara() {
       configurable: true,
       enumerable: true,
       get() { return value; },
-      set(v) {
-        value = v;
-        if (v && typeof v === 'object') v.toggleMap = toggleMap;
+      set(api) {
+        value = api;
+        if (api && typeof api === 'object') api.toggleMap = toggleMap;
       }
     });
     if (value) value.toggleMap = toggleMap;
-  } catch (err) {
-    let tries = 0;
+  } catch (error) {
+    let attempts = 0;
     const timer = setInterval(() => {
-      const s = window.SOLARA;
-      if (s && typeof s === 'object') {
-        s.toggleMap = toggleMap;
+      const solara = window.SOLARA;
+      if (solara && typeof solara === 'object') {
+        solara.toggleMap = toggleMap;
         clearInterval(timer);
       }
-      if (++tries > 40) clearInterval(timer);
-    }, 250);
+      if (++attempts > PATCH_MAX_TRIES) clearInterval(timer);
+    }, PATCH_RETRY_MS);
   }
 }
 
 // ---------------------------------------------------------------- minimap
-function drawMinimap(p, police, mission) {
+function drawMinimap(player, police, mission) {
   const ctx = miniCtx;
   if (!ctx || !world) return;
-  const S = 220 / MINI_VIEW;
-  const px = p.group.position.x;
-  const pz = p.group.position.z;
-  const heading = p.car ? p.car.root.rotation.y : p.group.rotation.y;
+  const MINI_SCALE = MINI_PX / MINI_VIEW;
+  const playerX = player.group.position.x;
+  const playerZ = player.group.position.z;
+  const heading = player.car ? player.car.root.rotation.y : player.group.rotation.y;
 
   ctx.save();
-  ctx.clearRect(0, 0, 220, 220);
+  ctx.clearRect(0, 0, MINI_PX, MINI_PX);
   ctx.beginPath();
-  ctx.arc(110, 110, 109, 0, TAU);
+  ctx.arc(MINI_CENTER, MINI_CENTER, MINI_CLIP_RADIUS, 0, TAU);
   ctx.fillStyle = '#0b1d21';
   ctx.fill();
   ctx.clip();
 
   // Blit the world raster centred on the player.
-  let sx = (px + MAP_UNITS / 2) * MS - (MINI_VIEW / 2) * MS;
-  let sy = (pz + MAP_UNITS / 2) * MS - (MINI_VIEW / 2) * MS;
-  let sw = MINI_VIEW * MS;
-  let sh = MINI_VIEW * MS;
-  const PPU = 220 / (MINI_VIEW * MS);          // dest px per source px
-  let dx = 0, dy = 0, dw = 220, dh = 220;
-  if (sx < 0) { const cut = -sx; dx = cut * PPU; dw -= dx; sw -= cut; sx = 0; }
-  if (sy < 0) { const cut = -sy; dy = cut * PPU; dh -= dy; sh -= cut; sy = 0; }
-  if (sx + sw > MAP_PX) { const cut = sx + sw - MAP_PX; sw -= cut; dw -= cut * PPU; }
-  if (sy + sh > MAP_PX) { const cut = sy + sh - MAP_PX; sh -= cut; dh -= cut * PPU; }
-  if (sw > 0 && sh > 0) ctx.drawImage(world, sx, sy, sw, sh, dx, dy, dw, dh);
+  let sourceX = (playerX + MAP_UNITS / 2) * MAP_SCALE - (MINI_VIEW / 2) * MAP_SCALE;
+  let sourceY = (playerZ + MAP_UNITS / 2) * MAP_SCALE - (MINI_VIEW / 2) * MAP_SCALE;
+  let sourceWidth = MINI_VIEW * MAP_SCALE;
+  let sourceHeight = MINI_VIEW * MAP_SCALE;
+  const DEST_PER_SOURCE = MINI_PX / (MINI_VIEW * MAP_SCALE);          // dest px per source px
+  let destX = 0, destY = 0, destWidth = MINI_PX, destHeight = MINI_PX;
+  if (sourceX < 0) { const cut = -sourceX; destX = cut * DEST_PER_SOURCE; destWidth -= destX; sourceWidth -= cut; sourceX = 0; }
+  if (sourceY < 0) { const cut = -sourceY; destY = cut * DEST_PER_SOURCE; destHeight -= destY; sourceHeight -= cut; sourceY = 0; }
+  if (sourceX + sourceWidth > MAP_PX) { const cut = sourceX + sourceWidth - MAP_PX; sourceWidth -= cut; destWidth -= cut * DEST_PER_SOURCE; }
+  if (sourceY + sourceHeight > MAP_PX) { const cut = sourceY + sourceHeight - MAP_PX; sourceHeight -= cut; destHeight -= cut * DEST_PER_SOURCE; }
+  if (sourceWidth > 0 && sourceHeight > 0) ctx.drawImage(world, sourceX, sourceY, sourceWidth, sourceHeight, destX, destY, destWidth, destHeight);
 
   // Wanted arc around the bezel.
   if (police && police.stars > 0) {
     ctx.strokeStyle = 'rgba(255,90,70,.55)';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(110, 110, 105, -Math.PI / 2, -Math.PI / 2 + TAU * (police.stars / 5));
+    ctx.arc(MINI_CENTER, MINI_CENTER, MINI_WANTED_RADIUS, -Math.PI / 2, -Math.PI / 2 + TAU * (police.stars / MAX_STARS));
     ctx.stroke();
   }
 
-  const toMap = (x, z) => [110 + (x - px) * S, 110 + (z - pz) * S];
-  const inside = (x, y, r = 100) => Math.hypot(x - 110, y - 110) < r;
+  const toMap = (worldX, worldZ) => [MINI_CENTER + (worldX - playerX) * MINI_SCALE, MINI_CENTER + (worldZ - playerZ) * MINI_SCALE];
+  const inside = (mapX, mapY, radius = 100) => Math.hypot(mapX - MINI_CENTER, mapY - MINI_CENTER) < radius;
 
   // Police blips.
   if (police) {
-    const flash = Math.floor(performance.now() / 220) % 2 === 0;
+    const flash = Math.floor(performance.now() / BLIP_FLASH_MS) % 2 === 0;
     const units = police.units || [];
-    for (let i = 0; i < units.length; i++) {
-      const u = units[i];
-      if (!u || !u.root) continue;
-      const [x, y] = toMap(u.root.position.x, u.root.position.z);
-      if (!inside(x, y, 102)) continue;
+    for (let unitIndex = 0; unitIndex < units.length; unitIndex++) {
+      const unit = units[unitIndex];
+      if (!unit || !unit.root) continue;
+      const [mapX, mapY] = toMap(unit.root.position.x, unit.root.position.z);
+      if (!inside(mapX, mapY, MINI_BLIP_RADIUS)) continue;
       ctx.fillStyle = flash ? '#ff4d3f' : '#4f8bff';
       ctx.beginPath();
-      ctx.arc(x, y, 3.4, 0, TAU);
+      ctx.arc(mapX, mapY, 3.4, 0, TAU);
       ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,.55)';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-    for (const f of police.foot || []) {
-      if (!f || !f.mesh) continue;
-      const [x, y] = toMap(f.mesh.position.x, f.mesh.position.z);
-      if (!inside(x, y, 102)) continue;
+    for (const cop of police.foot || []) {
+      if (!cop || !cop.mesh) continue;
+      const [mapX, mapY] = toMap(cop.mesh.position.x, cop.mesh.position.z);
+      if (!inside(mapX, mapY, MINI_BLIP_RADIUS)) continue;
       ctx.fillStyle = '#9cc4ff';
       ctx.beginPath();
-      ctx.arc(x, y, 2.2, 0, TAU);
+      ctx.arc(mapX, mapY, 2.2, 0, TAU);
       ctx.fill();
     }
     if (police.heli && police.heli.group) {
-      const [x, y] = toMap(police.heli.group.position.x, police.heli.group.position.z);
-      if (inside(x, y, 102)) {
+      const [mapX, mapY] = toMap(police.heli.group.position.x, police.heli.group.position.z);
+      if (inside(mapX, mapY, MINI_BLIP_RADIUS)) {
         ctx.strokeStyle = '#ffd27a';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, TAU);
+        ctx.arc(mapX, mapY, 5, 0, TAU);
         ctx.stroke();
       }
     }
-    for (const b of police.roadblock || []) {
-      if (!b || !b.root) continue;
-      const [x, y] = toMap(b.root.position.x, b.root.position.z);
-      if (inside(x, y, 102)) {
+    for (const block of police.roadblock || []) {
+      if (!block || !block.root) continue;
+      const [mapX, mapY] = toMap(block.root.position.x, block.root.position.z);
+      if (inside(mapX, mapY, MINI_BLIP_RADIUS)) {
         ctx.fillStyle = '#ff6a54';
-        ctx.fillRect(x - 2, y - 2, 4, 4);
+        ctx.fillRect(mapX - 2, mapY - 2, 4, 4);
       }
     }
   }
 
   // Mission marker, clamped to the bezel with a small pointer.
   if (mission && mission.marker && mission.marker.visible) {
-    let mx = (mission.marker.position.x - px) * S;
-    let my = (mission.marker.position.z - pz) * S;
-    const len = Math.hypot(mx, my);
-    let edge = false;
-    if (len > 96) {
-      mx = (mx / len) * 96;
-      my = (my / len) * 96;
-      edge = true;
+    let markerOffsetX = (mission.marker.position.x - playerX) * MINI_SCALE;
+    let markerOffsetY = (mission.marker.position.z - playerZ) * MINI_SCALE;
+    const markerDistance = Math.hypot(markerOffsetX, markerOffsetY);
+    let atEdge = false;
+    if (markerDistance > MINI_MARKER_CLAMP) {
+      markerOffsetX = (markerOffsetX / markerDistance) * MINI_MARKER_CLAMP;
+      markerOffsetY = (markerOffsetY / markerDistance) * MINI_MARKER_CLAMP;
+      atEdge = true;
     }
-    const x = 110 + mx, y = 110 + my;
+    const markerX = MINI_CENTER + markerOffsetX, markerY = MINI_CENTER + markerOffsetY;
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(markerX, markerY);
     ctx.rotate(Math.PI / 4);
     ctx.fillStyle = '#f5bb62';
     ctx.strokeStyle = 'rgba(7,18,21,.9)';
@@ -752,17 +792,17 @@ function drawMinimap(p, police, mission) {
     ctx.fillRect(-4.3, -4.3, 8.6, 8.6);
     ctx.strokeRect(-4.3, -4.3, 8.6, 8.6);
     ctx.restore();
-    if (edge) {
+    if (atEdge) {
       ctx.fillStyle = 'rgba(245,187,98,.9)';
       ctx.beginPath();
-      ctx.arc(x, y, 1.6, 0, TAU);
+      ctx.arc(markerX, markerY, 1.6, 0, TAU);
       ctx.fill();
     }
   }
 
   // Player arrow (north-up map, arrow rotates with heading).
   ctx.save();
-  ctx.translate(110, 110);
+  ctx.translate(MINI_CENTER, MINI_CENTER);
   ctx.rotate(Math.PI - heading);
   ctx.fillStyle = '#f4fffb';
   ctx.strokeStyle = 'rgba(6,16,18,.9)';
@@ -778,12 +818,12 @@ function drawMinimap(p, police, mission) {
   ctx.restore();
 
   // Soft inner vignette.
-  const grad = ctx.createRadialGradient(110, 110, 66, 110, 110, 110);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, 'rgba(0,10,12,.55)');
-  ctx.fillStyle = grad;
+  const vignette = ctx.createRadialGradient(MINI_CENTER, MINI_CENTER, 66, MINI_CENTER, MINI_CENTER, MINI_CENTER);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(0,10,12,.55)');
+  ctx.fillStyle = vignette;
   ctx.beginPath();
-  ctx.arc(110, 110, 110, 0, TAU);
+  ctx.arc(MINI_CENTER, MINI_CENTER, MINI_CENTER, 0, TAU);
   ctx.fill();
   ctx.restore();
 }
@@ -800,12 +840,11 @@ const POIS = [
 function drawBigMap() {
   const ctx = bigCtx;
   if (!ctx || !world) return;
-  const W = 594;
-  const B = (v) => ((v + MAP_UNITS / 2) / MAP_UNITS) * W;
-  ctx.clearRect(0, 0, W, W);
+  const toAtlas = (worldCoord) => ((worldCoord + MAP_UNITS / 2) / MAP_UNITS) * ATLAS_PX;
+  ctx.clearRect(0, 0, ATLAS_PX, ATLAS_PX);
   ctx.fillStyle = '#0b1c21';
-  ctx.fillRect(0, 0, W, W);
-  ctx.drawImage(world, 0, 0, MAP_PX, MAP_PX, 0, 0, W, W);
+  ctx.fillRect(0, 0, ATLAS_PX, ATLAS_PX);
+  ctx.drawImage(world, 0, 0, MAP_PX, MAP_PX, 0, 0, ATLAS_PX, ATLAS_PX);
 
   // District names.
   const areas = [
@@ -817,44 +856,44 @@ function drawBigMap() {
     { name: 'LITTLE HAVANA', x: -66, z: 86 }
   ];
   ctx.textAlign = 'center';
-  for (const a of areas) {
+  for (const area of areas) {
     ctx.font = '700 12px "Inter", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,244,226,.72)';
-    ctx.fillText(a.name, B(a.x), B(a.z));
+    ctx.fillText(area.name, toAtlas(area.x), toAtlas(area.z));
     ctx.font = '600 8px "Inter", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,244,226,.3)';
-    ctx.fillText('SOLARA BAY', B(a.x), B(a.z) + 12);
+    ctx.fillText('SOLARA BAY', toAtlas(area.x), toAtlas(area.z) + 12);
   }
 
   // Sea label.
   ctx.font = 'italic 600 13px Georgia, serif';
   ctx.fillStyle = 'rgba(160,216,222,.55)';
-  ctx.fillText('SALT  REACH', B(120), B(-232) + 7);
+  ctx.fillText('SALT  REACH', toAtlas(120), toAtlas(-232) + 7);
 
   // Point of interest pins.
   for (const poi of POIS) {
-    const x = B(poi.x), y = B(poi.z);
+    const pinX = toAtlas(poi.x), pinY = toAtlas(poi.z);
     ctx.fillStyle = '#f5bb62';
     ctx.beginPath();
-    ctx.arc(x, y, 2.4, 0, TAU);
+    ctx.arc(pinX, pinY, 2.4, 0, TAU);
     ctx.fill();
     ctx.font = '700 8px "Inter", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,244,226,.62)';
     ctx.textAlign = 'left';
-    const flip = x > W - 100;
-    ctx.textAlign = flip ? 'right' : 'left';
-    ctx.fillText(poi.name, x + (flip ? -6 : 6), y + 3);
+    const flipLabel = pinX > ATLAS_PX - ATLAS_LABEL_FLIP_MARGIN;
+    ctx.textAlign = flipLabel ? 'right' : 'left';
+    ctx.fillText(poi.name, pinX + (flipLabel ? -6 : 6), pinY + 3);
   }
   ctx.textAlign = 'center';
 
-  const p = last.player;
+  const player = last.player;
   const police = last.police;
   const mission = last.mission;
 
   if (mission && mission.marker && mission.marker.visible) {
-    const x = B(mission.marker.position.x), y = B(mission.marker.position.z);
+    const markerX = toAtlas(mission.marker.position.x), markerY = toAtlas(mission.marker.position.z);
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(markerX, markerY);
     ctx.rotate(Math.PI / 4);
     ctx.fillStyle = '#f5bb62';
     ctx.strokeStyle = 'rgba(7,18,21,.9)';
@@ -864,37 +903,37 @@ function drawBigMap() {
     ctx.restore();
     ctx.font = '700 8px "Inter", system-ui, sans-serif';
     ctx.fillStyle = 'rgba(245,187,98,.8)';
-    ctx.fillText('OBJECTIVE', x, y - 12);
+    ctx.fillText('OBJECTIVE', markerX, markerY - 12);
   }
 
   if (police) {
-    const flash = Math.floor(performance.now() / 260) % 2 === 0;
-    for (const u of police.units || []) {
-      if (!u || !u.root) continue;
+    const flash = Math.floor(performance.now() / ATLAS_FLASH_MS) % 2 === 0;
+    for (const unit of police.units || []) {
+      if (!unit || !unit.root) continue;
       ctx.fillStyle = flash ? '#ff4d3f' : '#4f8bff';
       ctx.beginPath();
-      ctx.arc(B(u.root.position.x), B(u.root.position.z), 4, 0, TAU);
+      ctx.arc(toAtlas(unit.root.position.x), toAtlas(unit.root.position.z), 4, 0, TAU);
       ctx.fill();
     }
-    for (const b of police.roadblock || []) {
-      if (!b || !b.root) continue;
+    for (const block of police.roadblock || []) {
+      if (!block || !block.root) continue;
       ctx.fillStyle = '#ff6a54';
-      ctx.fillRect(B(b.root.position.x) - 3, B(b.root.position.z) - 3, 6, 6);
+      ctx.fillRect(toAtlas(block.root.position.x) - 3, toAtlas(block.root.position.z) - 3, 6, 6);
     }
     if (police.heli && police.heli.group) {
       ctx.strokeStyle = '#ffd27a';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(B(police.heli.group.position.x), B(police.heli.group.position.z), 8, 0, TAU);
+      ctx.arc(toAtlas(police.heli.group.position.x), toAtlas(police.heli.group.position.z), 8, 0, TAU);
       ctx.stroke();
     }
   }
 
-  if (p) {
-    const x = B(p.group.position.x), y = B(p.group.position.z);
-    const heading = p.car ? p.car.root.rotation.y : p.group.rotation.y;
+  if (player) {
+    const playerX = toAtlas(player.group.position.x), playerY = toAtlas(player.group.position.z);
+    const heading = player.car ? player.car.root.rotation.y : player.group.rotation.y;
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(playerX, playerY);
     ctx.rotate(Math.PI - heading);
     ctx.fillStyle = '#7ce7d3';
     ctx.strokeStyle = 'rgba(4,14,16,.95)';
@@ -912,7 +951,7 @@ function drawBigMap() {
 
   // Compass rose.
   ctx.save();
-  ctx.translate(W - 30, 30);
+  ctx.translate(ATLAS_PX - 30, 30);
   ctx.fillStyle = 'rgba(255,244,226,.7)';
   ctx.font = '800 11px "Inter", system-ui, sans-serif';
   ctx.textAlign = 'center';
@@ -933,12 +972,12 @@ export function updateHud(player, police, mission, toast) {
   if (!player || !player.group) return;
   build();
   const now = performance.now();
-  const dt = lastFrame ? Math.min(0.06, (now - lastFrame) / 1000) : 0.016;
+  const delta = lastFrame ? Math.min(MAX_HUD_DELTA, (now - lastFrame) / 1000) : DEFAULT_HUD_DELTA;
   lastFrame = now;
   last = { player, police, mission };
 
   if (mission && typeof mission.update === 'function') {
-    try { mission.update(dt, player, police); } catch (err) { /* keep the HUD alive */ }
+    try { mission.update(delta, player, police); } catch (error) { /* keep the HUD alive */ }
   }
 
   if (police && typeof police.drainEvents === 'function') {
@@ -952,12 +991,12 @@ export function updateHud(player, police, mission, toast) {
   lastToast = toast || '';
 
   // Vitals.
-  const hp = clamp(Number(player.health) || 0, 0, 100);
-  const ap = clamp(Number(player.armor) || 0, 0, 100);
-  txt(els.hp, String(Math.ceil(hp)));
-  txt(els.ap, String(Math.ceil(ap)));
-  setSegs(segmentBanks.hp, (hp / 100) * 14, hp < 30);
-  setSegs(segmentBanks.ap, (ap / 100) * 14, false);
+  const health = clamp(Number(player.health) || 0, 0, 100);
+  const armor = clamp(Number(player.armor) || 0, 0, 100);
+  txt(els.hp, String(Math.ceil(health)));
+  txt(els.ap, String(Math.ceil(armor)));
+  setSegs(segmentBanks.hp, (health / 100) * SEGMENT_COUNT, health < LOW_HEALTH);
+  setSegs(segmentBanks.ap, (armor / 100) * SEGMENT_COUNT, false);
   if (els.sta) els.sta.style.width = `${clamp(Number(player.stamina) || 0, 0, 100)}%`;
 
   const weapon = WEAPONS[clamp((Number(player.weapon) || 1) - 1, 0, WEAPONS.length - 1)];
@@ -966,13 +1005,13 @@ export function updateHud(player, police, mission, toast) {
   txt(els.ammo, `/ ${Number(player.ammo) || 0}`);
 
   const rideKey = player.car
-    ? `${String(player.car.type || 'SEDAN').toUpperCase()}|${Math.round(Math.abs(Number(player.car.speed) || 0) * 3.6)}`
+    ? `${String(player.car.type || 'SEDAN').toUpperCase()}|${Math.round(Math.abs(Number(player.car.speed) || 0) * KMH_PER_UNIT)}`
     : 'FOOT';
   if (cache.ride !== rideKey) {
     cache.ride = rideKey;
     if (els.ride) {
       els.ride.innerHTML = player.car
-        ? `${String(player.car.type || 'SEDAN').toUpperCase()} <span>${Math.round(Math.abs(Number(player.car.speed) || 0) * 3.6)} KM/H</span>`
+        ? `${String(player.car.type || 'SEDAN').toUpperCase()} <span>${Math.round(Math.abs(Number(player.car.speed) || 0) * KMH_PER_UNIT)} KM/H</span>`
         : 'ON FOOT <span>SHIFT TO SPRINT</span>';
     }
   }
@@ -981,25 +1020,25 @@ export function updateHud(player, police, mission, toast) {
   txt(els.cash, fmt(Number(player.money) || 0));
 
   // Wanted.
-  const stars = clamp(Math.round(Number(police && police.stars) || 0), 0, 5);
+  const stars = clamp(Math.round(Number(police && police.stars) || 0), 0, MAX_STARS);
   if (els.stars) {
     els.stars.classList.add('on');
     els.stars.classList.toggle('hot', stars >= 4);
   }
   if (els.starRow.__stars !== stars) {
     els.starRow.__stars = stars;
-    const kids = els.starRow.children;
-    for (let i = 0; i < kids.length; i++) kids[i].classList.toggle('lit', i < stars);
+    const starElements = els.starRow.children;
+    for (let starIndex = 0; starIndex < starElements.length; starIndex++) starElements[starIndex].classList.toggle('lit', starIndex < stars);
   }
   const arrest = police && Number(police.arrest) ? police.arrest : 0;
   if (els.arrest) els.arrest.classList.toggle('on', arrest > 0.02);
   if (els.arrestFill) els.arrestFill.style.width = `${clamp(arrest, 0, 1) * 100}%`;
-  let wsub = 'SEARCHING';
-  if (police && police.arresting) wsub = 'BEING ARRESTED';
-  else if (police && police.evading) wsub = 'EVADING';
-  else if (stars >= 4) wsub = 'AIR SUPPORT';
-  else if (stars === 0) wsub = '';
-  txt(els.wsub, wsub);
+  let wantedSubtitle = 'SEARCHING';
+  if (police && police.arresting) wantedSubtitle = 'BEING ARRESTED';
+  else if (police && police.evading) wantedSubtitle = 'EVADING';
+  else if (stars >= 4) wantedSubtitle = 'AIR SUPPORT';
+  else if (stars === 0) wantedSubtitle = '';
+  txt(els.wsub, wantedSubtitle);
 
   if (els.busted) els.busted.classList.toggle('on', !!(police && police.busted));
 
@@ -1011,28 +1050,28 @@ export function updateHud(player, police, mission, toast) {
   try {
     const audio = window.SOLARA && window.SOLARA.audio;
     if (audio && Number.isFinite(Number(audio.station))) station = Number(audio.station);
-  } catch (err) { station = 0; }
+  } catch (error) { station = 0; }
   txt(els.radio, STATIONS[clamp(station, 0, 2)]);
 
   renderToasts();
 
   // Slow lane: 10 Hz for the map, clock, distance.
-  if (now - lastSlow > 100) {
+  if (now - lastSlow > SLOW_LANE_MS) {
     lastSlow = now;
     const pos = player.group.position;
     const area = districtAt(pos);
     txt(els.district, area);
     txt(els.mmDistrict, area.toUpperCase());
-    const todRaw = (window.SOLARA && typeof window.SOLARA.timeOfDay === 'number') ? window.SOLARA.timeOfDay : (21 * 60 + 4 + Math.floor(now / 4000)) / 1440;
-    const mins = Math.floor((((todRaw % 1) + 1) % 1) * 1440);
-    const hh = String(Math.floor(mins / 60) % 24).padStart(2, '0');
-    const mm = String(mins % 60).padStart(2, '0');
-    txt(els.clock, `${hh}:${mm}`);
-    txt(els.mmTime, `${hh}:${mm}`);
+    const timeOfDayRaw = (window.SOLARA && typeof window.SOLARA.timeOfDay === 'number') ? window.SOLARA.timeOfDay : (FALLBACK_CLOCK_MINUTES + Math.floor(now / FALLBACK_CLOCK_TICK_MS)) / MINUTES_PER_DAY;
+    const totalMinutes = Math.floor((((timeOfDayRaw % 1) + 1) % 1) * MINUTES_PER_DAY);
+    const hours = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
+    const minutes = String(totalMinutes % 60).padStart(2, '0');
+    txt(els.clock, `${hours}:${minutes}`);
+    txt(els.mmTime, `${hours}:${minutes}`);
 
     if (mission && mission.marker && mission.marker.visible) {
-      const d = Math.hypot(mission.marker.position.x - pos.x, mission.marker.position.z - pos.z);
-      const label = d > 999 ? `${(d / 1000).toFixed(1)} KM` : `${Math.round(d)} M`;
+      const distance = Math.hypot(mission.marker.position.x - pos.x, mission.marker.position.z - pos.z);
+      const label = distance > KM_THRESHOLD ? `${(distance / METERS_PER_KM).toFixed(1)} KM` : `${Math.round(distance)} M`;
       if (els.mmeta) {
         const reward = Number(mission.reward) || 0;
         txt(els.mmeta, `${reward ? `+${fmt(reward)} CR · ` : ''}${label}`);
@@ -1041,27 +1080,27 @@ export function updateHud(player, police, mission, toast) {
       txt(els.mmeta, mission && mission.reward ? `+${fmt(mission.reward)} CR · NO FIXED POINT` : 'NO FIXED POINT');
     }
 
-    if (now - lastMini > 95) {
+    if (now - lastMini > MINIMAP_MS) {
       lastMini = now;
       drawMinimap(player, police, mission);
     }
   }
 
-  if (mapOpen && now - lastBig > 260) {
+  if (mapOpen && now - lastBig > BIGMAP_MS) {
     lastBig = now;
     drawBigMap();
   }
 }
 
 function setSegs(bank, count, low) {
-  const n = clamp(Math.round(count), 0, bank.length);
-  if (bank.__n === n && bank.__low === low) return;
-  bank.__n = n;
-  bank.__low = low;
-  for (let i = 0; i < bank.length; i++) {
-    const on = i < n;
-    bank[i].classList.toggle('on', on);
-    bank[i].classList.toggle('low', low);
+  const litCount = clamp(Math.round(count), 0, bank.length);
+  if (bank.__litCount === litCount && bank.__lowFlag === low) return;
+  bank.__litCount = litCount;
+  bank.__lowFlag = low;
+  for (let segIndex = 0; segIndex < bank.length; segIndex++) {
+    const isOn = segIndex < litCount;
+    bank[segIndex].classList.toggle('on', isOn);
+    bank[segIndex].classList.toggle('low', low);
   }
 }
 
@@ -1069,52 +1108,51 @@ function updateMissionCard(player, mission) {
   if (!mission) return;
   const current = typeof mission.current === 'function' ? mission.current() : null;
   const title = current ? String(current[0] || '') : '';
-  const idx = Number(mission.index) || 0;
-  const side = idx >= 6;
-  const storyTotal = 6;
-  txt(els.mtag, side ? 'SIDE JOB · SOLARA' : `STORY JOB · ${String(idx + 1).padStart(2, '0')} / ${String(storyTotal).padStart(2, '0')}`);
+  const missionIndex = Number(mission.index) || 0;
+  const side = missionIndex >= SIDE_MISSION_START;
+  txt(els.mtag, side ? 'SIDE JOB · SOLARA' : `STORY JOB · ${String(missionIndex + 1).padStart(2, '0')} / ${String(STORY_TOTAL).padStart(2, '0')}`);
 
-  const clean = title.replace(/^\d+\s*·\s*/, '').replace(/^SIDE\s*·\s*/, '');
-  txt(els.mtitle, clean || 'SOLARA BAY');
+  const cleanTitle = title.replace(/^\d+\s*·\s*/, '').replace(/^SIDE\s*·\s*/, '');
+  txt(els.mtitle, cleanTitle || 'SOLARA BAY');
 
   const objective = typeof mission.objectiveText === 'function' ? mission.objectiveText() : (current ? current[1] : '');
   txt(els.mobj, objective || (mission.done ? 'SOLARA BAY IS YOURS' : ''));
 
   const stepCount = Math.max(1, Number(mission.stepCount) || 1);
   const stepIndex = clamp(Number(mission.stepIndex) || 0, 0, stepCount - 1);
-  const pipKey = `${idx}:${stepCount}:${mission.done ? 1 : 0}`;
+  const pipKey = `${missionIndex}:${stepCount}:${mission.done ? 1 : 0}`;
   if (cache.pips !== pipKey) {
     cache.pips = pipKey;
     els.mpips.innerHTML = '';
-    for (let i = 0; i < stepCount; i++) els.mpips.appendChild(document.createElement('i'));
+    for (let pipIndex = 0; pipIndex < stepCount; pipIndex++) els.mpips.appendChild(document.createElement('i'));
   }
   const pips = els.mpips.children;
-  for (let i = 0; i < pips.length; i++) {
-    pips[i].classList.toggle('done', i < stepIndex || (mission.done && i <= stepIndex));
-    pips[i].classList.toggle('cur', i === stepIndex && !mission.done);
+  for (let pipIndex = 0; pipIndex < pips.length; pipIndex++) {
+    pips[pipIndex].classList.toggle('done', pipIndex < stepIndex || (mission.done && pipIndex <= stepIndex));
+    pips[pipIndex].classList.toggle('cur', pipIndex === stepIndex && !mission.done);
   }
 
   // Timer.
-  let left = null;
-  let total = 0;
-  if (typeof mission.timeLeft === 'function') left = mission.timeLeft();
-  if (typeof mission.timeTotal === 'function') total = Number(mission.timeTotal()) || 0;
-  const hasTimer = left !== null && left !== undefined;
+  let secondsLeft = null;
+  let totalSeconds = 0;
+  if (typeof mission.timeLeft === 'function') secondsLeft = mission.timeLeft();
+  if (typeof mission.timeTotal === 'function') totalSeconds = Number(mission.timeTotal()) || 0;
+  const hasTimer = secondsLeft !== null && secondsLeft !== undefined;
   if (els.mtimer) {
-    const label = hasTimer ? `${Math.floor(Math.max(0, left) / 60)}:${String(Math.max(0, Math.ceil(left)) % 60).padStart(2, '0')}` : '';
+    const label = hasTimer ? `${Math.floor(Math.max(0, secondsLeft) / 60)}:${String(Math.max(0, Math.ceil(secondsLeft)) % 60).padStart(2, '0')}` : '';
     txt(els.mtimer, label);
   }
   if (els.mtbar) {
     els.mtbar.classList.toggle('on', hasTimer);
-    els.mtbar.classList.toggle('low', hasTimer && left < 10);
+    els.mtbar.classList.toggle('low', hasTimer && secondsLeft < LOW_TIME_SECONDS);
     if (hasTimer) {
-      const ratio = total > 0 ? clamp(left / total, 0, 1) : 1;
+      const ratio = totalSeconds > 0 ? clamp(secondsLeft / totalSeconds, 0, 1) : 1;
       els.mtbarFill.style.width = `${ratio * 100}%`;
     }
   }
 
   // Until the slow lane measures distance, keep the meta line useful.
-  if (!els.mmeta.__t && mission.reward) txt(els.mmeta, `+${fmt(Number(mission.reward) || 0)} CR`);
+  if (!els.mmeta.__cachedText && mission.reward) txt(els.mmeta, `+${fmt(Number(mission.reward) || 0)} CR`);
 }
 
 // Keep the HUD legible if a future main.js calls updateHud before the player exists.

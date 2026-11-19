@@ -1,6 +1,41 @@
-const KEY='solara-save-v2';
-export function saveGame(state){try{localStorage.setItem(KEY,JSON.stringify({...state,savedAt:Date.now()}));return true;}catch{return false;}}
-export function loadGame(){try{const value=JSON.parse(localStorage.getItem(KEY)||'null');return value&&typeof value==='object'?value:null;}catch{return null;}}
-export function clearSave(){try{localStorage.removeItem(KEY);}catch{}}
-export function saveSettings(settings){try{localStorage.setItem(KEY+'-settings',JSON.stringify(settings));}catch{}}
-export function loadSettings(){try{return JSON.parse(localStorage.getItem(KEY+'-settings')||'{}');}catch{return {};}}
+// localStorage persistence for the run (money, mission, health) and the settings menu.
+const SAVE_KEY = 'solara-save-v2';
+const SETTINGS_KEY = SAVE_KEY + '-settings';
+
+export function saveGame(state) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadGame() {
+  try {
+    const parsedState = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    return parsedState && typeof parsedState === 'object' ? parsedState : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {}
+}
+
+export function saveSettings(settings) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
+}
+
+export function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}

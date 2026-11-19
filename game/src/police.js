@@ -10,21 +10,189 @@ const ROAD = 34;                 // road centre lines every 34 units
 const ROAD_HALF = 5.5;           // half the 11 unit carriageway
 const EDGE = 204;                // outermost legal intersection
 const ARREST_TIME = 2.5;
-const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-const wrap = (a) => {
-  a = (a + Math.PI) % TAU;
-  if (a < 0) a += TAU;
-  return a - Math.PI;
+const MAX_STARS = 5;
+const clamp = (value, min, max) => (value < min ? min : value > max ? max : value);
+const wrap = (angle) => {
+  angle = (angle + Math.PI) % TAU;
+  if (angle < 0) angle += TAU;
+  return angle - Math.PI;
 };
-const snapRoad = (v) => Math.round(v / ROAD) * ROAD;
-const dist2 = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+const snapRoad = (coord) => Math.round(coord / ROAD) * ROAD;
+const dist2 = (x1, z1, x2, z2) => Math.hypot(x1 - x2, z1 - z2);
 
 const DESIRED_CARS = [0, 2, 3, 5, 7, 9];
 const DESIRED_FOOT = [0, 1, 2, 2, 2, 2];
 
+// Wanted-level and dispatch timing.
+const CRIME_LOCK_MS = 1100;
+const HEAT_LOCK_MS = 1300;
+const MAX_HEAT = 4;
+const DISPATCH_CAP = 0.4;
+const DISPATCH_INTERVAL = 1.35;
+const ROADBLOCK_CD_CAP = 4;
+const ROADBLOCK_INTERVAL = 24;
+const ROADBLOCK_MIN_CD = 8;
+const INITIAL_ROADBLOCK_CD = 10;
+const MAX_BLOCK_GROUPS = 2;
+const BLOCK_DESPAWN_DIST = 150;
+const DESPAWN_DISTANCE = 285;
+const FOOT_DESPAWN = 160;
+const MAX_STEP_DELTA = 0.06;
+const PLAYER_SPEED_SMOOTH = 6;
+const NEAR_FALLBACK = 9999;
+const ARREST_ACTIVE_THRESHOLD = 0.15;
+const EVADE_DISPLAY_SECONDS = 2.5;
+// Spawning.
+const SPAWN_ATTEMPTS = 14;
+const SEA_Z_LIMIT = -200;
+const UNIT_CROWD_RADIUS = 15;
+const BURST_MIN_DIST = 55;
+const BURST_MAX_DIST = 95;
+const DISPATCH_MIN_DIST = 50;
+const DISPATCH_MAX_DIST = 110;
+const INITIAL_UNIT_SPEED = 8;
+const AGGRESSION_BASE = 0.7;
+const AGGRESSION_RANGE = 0.6;
+const CAR_RIDE_HEIGHT = 0.55;
+const FOOT_PHASE_RANGE = 5;
+const FOOT_BASE_SPEED = 3.4;
+const FOOT_SPEED_RANGE = 1.2;
+const FOOT_FIRE_INITIAL = 1;
+const FOOT_SPAWN_ATTEMPTS = 8;
+const FOOT_SPAWN_SPREAD = 26;
+const FOOT_SPAWN_AHEAD = 14;
+const FOOT_SPAWN_DEPTH = 18;
+// Roadblocks.
+const ROADBLOCK_AHEAD = 82;
+const ROADBLOCK_SEA_LIMIT = -198;
+const ROADBLOCK_FALLBACK_Z = -170;
+const ROADBLOCK_SPACING = 5.4;
+const ROADBLOCK_BOUND = 208;
+const ROADBLOCK_LIFETIME = 26;
+// Helicopter orbit and lights.
+const HELI_SPAWN_OFFSET_X = 18;
+const HELI_HEIGHT = 30;
+const HELI_ORBIT_RADIUS = 23;
+const HELI_RADIUS_SWING = 4;
+const HELI_RADIUS_RATE = 0.2;
+const HELI_HEIGHT_SWING = 2.2;
+const HELI_HEIGHT_RATE = 0.6;
+const HELI_ANGLE_RATE = 0.34;
+const HELI_FOLLOW_RATE = 1.2;
+const HELI_VERTICAL_RATE = 0.9;
+const HELI_TURN_RATE = 1.5;
+const HELI_BANK_RATE = 0.8;
+const HELI_BANK_AMOUNT = 0.04;
+const ROTOR_SPEED = 26;
+const TAIL_ROTOR_SPEED = 32;
+const HELI_BLINK_RATE = 2.4;
+const SHAFT_BASE_OPACITY = 0.055;
+const SHAFT_PULSE_RATE = 3.1;
+const SHAFT_PULSE_AMOUNT = 0.02;
+const SIREN_RED = 0xff2d3d;
+const SIREN_BLUE = 0x3d7bff;
+const BEACON_RED_OFF = 0x3a0a0e;
+const BEACON_BLUE_OFF = 0x0d2361;
+// Patrol car pursuit.
+const FAR_PURSUIT_DISTANCE = 44;
+const WAYPOINT_REFRESH = 0.55;
+const LEAD_DISTANCE = 30;
+const LEAD_FACTOR = 0.28;
+const PIT_NEAR = 17;
+const PIT_FAR = 5;
+const PIT_OFFSET = 4.2;
+const BASE_TURN_RATE = 2.35;
+const TURN_SPEED_REF = 16;
+const TURN_FACTOR_MIN = 0.35;
+const TURN_FACTOR_MAX = 1.5;
+const BASE_CHASE_SPEED = 13;
+const SPEED_PER_STAR = 4.6;
+const CLOSE_DISTANCE = 26;
+const CLOSE_CAR_SPEED = 10;
+const CLOSE_CAR_PER_STAR = 3.4;
+const CLOSE_FOOT_SPEED = 6.5;
+const CORNER_ANGLE = 1.15;
+const CORNER_SPEED_FACTOR = 0.58;
+const REVERSE_SPEED = -6;
+const STUCK_ANGLE = 2.4;
+const STUCK_SPEED = 4;
+const STUCK_TIME = 1.3;
+const REVERSE_BASE = 0.9;
+const REVERSE_RANGE = 0.5;
+const HEADING_JITTER = 0.8;
+const SPEED_SMOOTH_RATE = 2.6;
+const UNIT_BOUND = 226;
+const BOB_RATE = 0.012;
+const BOB_MAX = 0.03;
+const BOB_PER_SPEED = 0.001;
+const WHEEL_SPIN_FACTOR = 1.4;
+const SIREN_FLASH_RATE = 3;
+const SIREN_FLASH_OFFSET = 1.5;
+const WRECK_SPEED_DECAY = 0.9;
+const WRECK_TILT_MAX = 0.25;
+const WRECK_TILT_RATE = 0.4;
+// Contact damage and shooting.
+const RAM_CAR_DIST = 5.4;
+const RAM_FOOT_DIST = 4.6;
+const RAM_MIN_SPEED = 2;
+const RAM_CAR_DAMAGE = 8;
+const RAM_FOOT_DAMAGE = 5;
+const RAM_SPEED_REF = 18;
+const RAM_FACTOR_MIN = 0.3;
+const RAM_FACTOR_MAX = 1.6;
+const CAR_RAM_DAMAGE = 12;
+const SHOOT_DISTANCE = 26;
+const SHOOT_MAX_SPEED = 24;
+const UNIT_FIRE_BASE = 1.3;
+const UNIT_FIRE_RANGE = 0.6;
+const SHOOT_DAMAGE_BASE = 3;
+const SHOOT_DAMAGE_RANGE = 2.5;
+// Foot cops.
+const TELEPORT_DISTANCE = 110;
+const TELEPORT_SPREAD = 40;
+const TELEPORT_AHEAD = 30;
+const RUN_PHASE_RATE = 7;
+const WALK_PHASE_RATE = 2;
+const RUN_DISTANCE_THRESHOLD = 12;
+const APPROACH_DISTANCE = 8.5;
+const RETREAT_DISTANCE = 5;
+const RETREAT_SPEED = 1.2;
+const LEG_SWING_AMOUNT = 0.55;
+const FOOT_FIRE_DISTANCE = 26;
+const FOOT_FIRE_BASE = 1.5;
+const FOOT_FIRE_RANGE = 0.8;
+const FOOT_DAMAGE_BASE = 4;
+const FOOT_DAMAGE_RANGE = 3;
+const FOOT_ARREST_DISTANCE = 4.4;
+// Crowd avoidance and road guidance.
+const CROWD_RADIUS = 8;
+const CROWD_MIN_DISTANCE = 0.01;
+const CROWD_AHEAD_MIN = 0.2;
+const CROWD_STEER_FACTOR = 0.05;
+const CROWD_SPEED_DAMP = 0.985;
+const BLOCK_LOOKAHEAD = 7;
+const BLOCK_MARGIN = 1;
+const BLOCK_BOUND_X = 220;
+const BLOCK_BOUND_Z = 210;
+const BLOCK_STEER_AMOUNT = 0.4;
+const ROAD_GUIDE_MARGIN = 2;
+const GUIDE_STEP_LIMIT = 24;
+// Arrest and evasion.
+const ARREST_CAR_DIST = 4.9;
+const ARREST_FOOT_DIST = 4.2;
+const ARREST_SLOW_SPEED = 3.4;
+const ARREST_DECAY_RATE = 1.6;
+const ARREST_CAR_DECAY_RATE = 2;
+const BUSTED_DURATION = 3;
+const SEEN_CAR_DIST = 58;
+const SEEN_FOOT_DIST = 48;
+const SEEN_HELI_DIST = 78;
+const EVADE_DELAY = 5.5;
+const HEAT_DECAY_TIME = 7.5;
+
 // Small shared materials — one set per police instance keeps allocations down.
-function mat(color, rough = 0.6, metal = 0.1) {
-  return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+function mat(color, roughness = 0.6, metalness = 0.1) {
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness });
 }
 
 export function createPolice(scene) {
@@ -49,8 +217,8 @@ export function createPolice(scene) {
   let playerSpeed = 0;
   const events = [];
 
-  const sirenMatA = new THREE.MeshBasicMaterial({ color: 0xff2d3d });
-  const sirenMatB = new THREE.MeshBasicMaterial({ color: 0x3d7bff });
+  const sirenMatA = new THREE.MeshBasicMaterial({ color: SIREN_RED });
+  const sirenMatB = new THREE.MeshBasicMaterial({ color: SIREN_BLUE });
   const skinMat = mat(0xa97455, 0.85);
   const navyMat = mat(0x1f2f4a, 0.72);
   const vestMat = mat(0x141d2a, 0.55);
@@ -62,38 +230,38 @@ export function createPolice(scene) {
     roadblock,
     get heli() { return heli; },
     get stars() { return wanted; },
-    set stars(n) {
-      n = clamp(Math.round(Number(n) || 0), 0, 5);
-      if (n === wanted) return;
-      const up = n > wanted;
-      wanted = n;
+    set stars(level) {
+      level = clamp(Math.round(Number(level) || 0), 0, MAX_STARS);
+      if (level === wanted) return;
+      const raising = level > wanted;
+      wanted = level;
       heat = 0;
       arrest = 0;
       evade = 0;
       decay = 0;
-      if (!n) {
+      if (!level) {
         clearAll();
         events.push('HEAT LOST');
       } else {
         dispatch = 0;
-        roadblockCd = n >= 3 ? 0 : 10;
-        if (up) events.push(`WANTED LEVEL ${n}`);
-        if (n >= 4 && !heli) spawnHeli();
-        if (n < 4 && heli) { scene.remove(heli.group); if (heli.target && heli.target.parent) scene.remove(heli.target); heli = null; }
-        if (n >= 3) spawnBurst();
+        roadblockCd = level >= 3 ? 0 : INITIAL_ROADBLOCK_CD;
+        if (raising) events.push(`WANTED LEVEL ${level}`);
+        if (level >= 4 && !heli) spawnHeli();
+        if (level < 4 && heli) { scene.remove(heli.group); if (heli.target && heli.target.parent) scene.remove(heli.target); heli = null; }
+        if (level >= 3) spawnBurst();
       }
     },
     get clock() { return decay; },
     get arrest() { return clamp(arrest / ARREST_TIME, 0, 1); },
-    get arresting() { return arrest > 0.15; },
+    get arresting() { return arrest > ARREST_ACTIVE_THRESHOLD; },
     get busted() { return busted > 0; },
-    get evading() { return wanted > 0 && evade > 2.5; },
-    get heat() { return wanted ? clamp((wanted + heat) / 5, 0, 1) : 0; },
+    get evading() { return wanted > 0 && evade > EVADE_DISPLAY_SECONDS; },
+    get heat() { return wanted ? clamp((wanted + heat) / MAX_STARS, 0, 1) : 0; },
     get nearest() {
-      let best = 9999;
-      for (const u of units) if (u.car.hp > 0) best = Math.min(best, dist2(u.car.root.position.x, u.car.root.position.z, lastPlayer.x, lastPlayer.z));
-      for (const f of foot) best = Math.min(best, dist2(f.mesh.position.x, f.mesh.position.z, lastPlayer.x, lastPlayer.z));
-      return best;
+      let nearestDistance = NEAR_FALLBACK;
+      for (const unit of units) if (unit.car.hp > 0) nearestDistance = Math.min(nearestDistance, dist2(unit.car.root.position.x, unit.car.root.position.z, lastPlayer.x, lastPlayer.z));
+      for (const cop of foot) nearestDistance = Math.min(nearestDistance, dist2(cop.mesh.position.x, cop.mesh.position.z, lastPlayer.x, lastPlayer.z));
+      return nearestDistance;
     },
     onArrest: null,
     crime,
@@ -103,55 +271,55 @@ export function createPolice(scene) {
   };
 
   // ---------------------------------------------------------------- spawning
-  function makePoliceCar(x, z, heading) {
+  function makePoliceCar(positionX, positionZ, heading) {
     let car = null;
     const factory = VEHICLES.makeCarMesh;
     if (typeof factory === 'function') {
       try {
         car = factory('police');
         if (!car || !car.root) car = factory(scene, 'police');
-      } catch (err) { car = null; }
+      } catch (error) { car = null; }
     }
     if (!car || !car.root) {
-      car = VEHICLES.makeCar(scene, x, z, 0xe9e3ce, true, 'police');
+      car = VEHICLES.makeCar(scene, positionX, positionZ, 0xe9e3ce, true, 'police');
     } else if (!car.root.parent) {
       scene.add(car.root);
     }
-    car.root.position.set(x, 0.55, z);
+    car.root.position.set(positionX, CAR_RIDE_HEIGHT, positionZ);
     car.root.rotation.y = heading;
     return car;
   }
 
-  function spawnPoint(px, pz, minD, maxD) {
+  function spawnPoint(playerX, playerZ, minDistance, maxDistance) {
     let best = null;
-    for (let i = 0; i < 14; i++) {
-      const a = Math.random() * TAU;
-      const r = minD + Math.random() * (maxD - minD);
-      const x = clamp(snapRoad(px + Math.sin(a) * r), -EDGE, EDGE);
-      const z = clamp(snapRoad(pz + Math.cos(a) * r), -EDGE, EDGE);
-      if (z <= -200) continue;
+    for (let attempt = 0; attempt < SPAWN_ATTEMPTS; attempt++) {
+      const angle = Math.random() * TAU;
+      const distance = minDistance + Math.random() * (maxDistance - minDistance);
+      const spawnX = clamp(snapRoad(playerX + Math.sin(angle) * distance), -EDGE, EDGE);
+      const spawnZ = clamp(snapRoad(playerZ + Math.cos(angle) * distance), -EDGE, EDGE);
+      if (spawnZ <= SEA_Z_LIMIT) continue;
       let crowded = false;
-      for (const u of units) if (dist2(u.car.root.position.x, u.car.root.position.z, x, z) < 15) crowded = true;
+      for (const unit of units) if (dist2(unit.car.root.position.x, unit.car.root.position.z, spawnX, spawnZ) < UNIT_CROWD_RADIUS) crowded = true;
       if (crowded) continue;
-      best = { x, z };
+      best = { x: spawnX, z: spawnZ };
       break;
     }
-    return best || { x: clamp(snapRoad(px + minD), -EDGE, EDGE), z: clamp(snapRoad(pz), -EDGE, EDGE) };
+    return best || { x: clamp(snapRoad(playerX + minDistance), -EDGE, EDGE), z: clamp(snapRoad(playerZ), -EDGE, EDGE) };
   }
 
-  function addUnit(x, z, heading) {
-    const car = makePoliceCar(x, z, heading);
+  function addUnit(positionX, positionZ, heading) {
+    const car = makePoliceCar(positionX, positionZ, heading);
     const unit = {
       car,
       root: car.root,
       heading,
-      speed: 8,
-      wp: { x, z },
+      speed: INITIAL_UNIT_SPEED,
+      wp: { x: positionX, z: positionZ },
       wpAt: 0,
       stuck: 0,
       reverse: 0,
       pitSide: Math.random() < 0.5 ? 1 : -1,
-      aggression: 0.7 + Math.random() * 0.6,
+      aggression: AGGRESSION_BASE + Math.random() * AGGRESSION_RANGE,
       lit: Math.random() < 0.5
     };
     units.push(unit);
@@ -159,15 +327,15 @@ export function createPolice(scene) {
   }
 
   function spawnBurst() {
-    const p = lastPlayer;
+    const playerPos = lastPlayer;
     const count = wanted >= 4 ? 3 : 2;
-    for (let i = 0; i < count && units.length < DESIRED_CARS[wanted]; i++) {
-      const pt = spawnPoint(p.x, p.z, 55, 95);
-      addUnit(pt.x, pt.z, Math.atan2(p.x - pt.x, p.z - pt.z));
+    for (let index = 0; index < count && units.length < DESIRED_CARS[wanted]; index++) {
+      const point = spawnPoint(playerPos.x, playerPos.z, BURST_MIN_DIST, BURST_MAX_DIST);
+      addUnit(point.x, point.z, Math.atan2(playerPos.x - point.x, playerPos.z - point.z));
     }
   }
 
-  function spawnFootCop(px, pz) {
+  function spawnFootCop(playerX, playerZ) {
     const group = new THREE.Group();
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.62, 3, 7), navyMat);
     body.position.y = 0.86;
@@ -194,30 +362,30 @@ export function createPolice(scene) {
     gun.position.set(0.2, 1.05, 0.3);
     group.add(gun);
 
-    let x = px, z = pz;
-    for (let i = 0; i < 8; i++) {
-      x = px + (Math.random() - 0.5) * 26;
-      z = pz + 14 + Math.random() * 18;
-      if (z > -200) break;
+    let spawnX = playerX, spawnZ = playerZ;
+    for (let attempt = 0; attempt < FOOT_SPAWN_ATTEMPTS; attempt++) {
+      spawnX = playerX + (Math.random() - 0.5) * FOOT_SPAWN_SPREAD;
+      spawnZ = playerZ + FOOT_SPAWN_AHEAD + Math.random() * FOOT_SPAWN_DEPTH;
+      if (spawnZ > SEA_Z_LIMIT) break;
     }
-    group.position.set(x, 0, z);
+    group.position.set(spawnX, 0, spawnZ);
     scene.add(group);
-    foot.push({ mesh: group, body, legs, heading: 0, phase: Math.random() * 5, fireCd: 1 + Math.random(), speed: 3.4 + Math.random() * 1.2 });
+    foot.push({ mesh: group, body, legs, heading: 0, phase: Math.random() * FOOT_PHASE_RANGE, fireCd: FOOT_FIRE_INITIAL + Math.random(), speed: FOOT_BASE_SPEED + Math.random() * FOOT_SPEED_RANGE });
   }
 
-  function spawnRoadblock(px, pz, heading) {
+  function spawnRoadblock(playerX, playerZ, heading) {
     // Put the barricade across the road ahead of the player, perpendicular to travel.
-    const fx = Math.sin(heading), fz = Math.cos(heading);
-    let bx = px + fx * 82, bz = pz + fz * 82;
-    bx = snapRoad(bx);
-    bz = snapRoad(bz);
-    if (bz < -198) bz = -170;
+    const forwardX = Math.sin(heading), forwardZ = Math.cos(heading);
+    let blockX = playerX + forwardX * ROADBLOCK_AHEAD, blockZ = playerZ + forwardZ * ROADBLOCK_AHEAD;
+    blockX = snapRoad(blockX);
+    blockZ = snapRoad(blockZ);
+    if (blockZ < ROADBLOCK_SEA_LIMIT) blockZ = ROADBLOCK_FALLBACK_Z;
     const perpX = Math.cos(heading), perpZ = -Math.sin(heading);
-    const group = { cars: [], until: 26 };
-    for (let i = -1; i <= 1; i++) {
-      const x = clamp(bx + perpX * i * 5.4, -208, 208);
-      const z = clamp(bz + perpZ * i * 5.4, -208, 208);
-      const car = makePoliceCar(x, z, heading + Math.PI / 2);
+    const group = { cars: [], until: ROADBLOCK_LIFETIME };
+    for (let offsetIndex = -1; offsetIndex <= 1; offsetIndex++) {
+      const carX = clamp(blockX + perpX * offsetIndex * ROADBLOCK_SPACING, -ROADBLOCK_BOUND, ROADBLOCK_BOUND);
+      const carZ = clamp(blockZ + perpZ * offsetIndex * ROADBLOCK_SPACING, -ROADBLOCK_BOUND, ROADBLOCK_BOUND);
+      const car = makePoliceCar(carX, carZ, heading + Math.PI / 2);
       car.speed = 0;
       group.cars.push(car);
       roadblock.push(car);
@@ -254,10 +422,10 @@ export function createPolice(scene) {
     tailRotor.position.set(0.24, 0.35, -4.6);
     group.add(tailRotor);
 
-    const beaconR = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff2d3d }));
+    const beaconR = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), new THREE.MeshBasicMaterial({ color: SIREN_RED }));
     beaconR.position.set(-0.55, 0.55, -0.4);
     group.add(beaconR);
-    const beaconB = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), new THREE.MeshBasicMaterial({ color: 0x3d7bff }));
+    const beaconB = new THREE.Mesh(new THREE.SphereGeometry(0.13, 6, 5), new THREE.MeshBasicMaterial({ color: SIREN_BLUE }));
     beaconB.position.set(0.55, 0.55, -0.4);
     group.add(beaconB);
 
@@ -276,7 +444,7 @@ export function createPolice(scene) {
     light.target = target;
     group.add(light);
 
-    group.position.set(lastPlayer.x + 18, 30, lastPlayer.z);
+    group.position.set(lastPlayer.x + HELI_SPAWN_OFFSET_X, HELI_HEIGHT, lastPlayer.z);
     scene.add(group);
     heli = { group, rotor, tailRotor, light, target, beaconR, beaconB, shaft, angle: Math.random() * TAU };
     events.push('AIR SUPPORT INBOUND');
@@ -285,17 +453,17 @@ export function createPolice(scene) {
   function removeCar(car) {
     if (!car || !car.root) return;
     scene.remove(car.root);
-    car.root.traverse((o) => {
-      if (o.material && o.material.dispose && o.material !== sirenMatA && o.material !== sirenMatB) o.material.dispose();
+    car.root.traverse((object) => {
+      if (object.material && object.material.dispose && object.material !== sirenMatA && object.material !== sirenMatB) object.material.dispose();
     });
   }
 
   function clearAll() {
-    for (const u of units) removeCar(u.car);
+    for (const unit of units) removeCar(unit.car);
     units.length = 0;
-    for (const f of foot) scene.remove(f.mesh);
+    for (const cop of foot) scene.remove(cop.mesh);
     foot.length = 0;
-    for (const c of roadblock) removeCar(c);
+    for (const car of roadblock) removeCar(car);
     roadblock.length = 0;
     blockGroups.length = 0;
     if (heli) {
@@ -310,31 +478,31 @@ export function createPolice(scene) {
   }
 
   // ---------------------------------------------------------------- wanted logic
-  function applyCrime(n) {
+  function applyCrime(amount) {
     const before = wanted;
-    wanted = clamp(wanted + n, 0, 5);
-    dispatch = Math.min(dispatch, 0.4);
+    wanted = clamp(wanted + amount, 0, MAX_STARS);
+    dispatch = Math.min(dispatch, DISPATCH_CAP);
     evasionReset();
     if (wanted > before) {
       events.push(`WANTED LEVEL ${wanted}`);
       if (wanted >= 4 && !heli) spawnHeli();
       if (wanted >= 3) {
-        roadblockCd = Math.min(roadblockCd, 4);
+        roadblockCd = Math.min(roadblockCd, ROADBLOCK_CD_CAP);
         spawnBurst();
       }
     }
   }
 
-  function crime(n = 1) {
-    n = Math.max(1, Math.round(Number(n) || 1));
+  function crime(amount = 1) {
+    amount = Math.max(1, Math.round(Number(amount) || 1));
     const now = performance.now();
     if (now < crimeLock) {
-      heat = Math.min(4, heat + n);
+      heat = Math.min(MAX_HEAT, heat + amount);
       return wanted;
     }
-    applyCrime(n >= 3 ? 2 : 1);
-    heat = Math.max(0, heat + n - 2);
-    crimeLock = now + 1100;
+    applyCrime(amount >= 3 ? 2 : 1);
+    heat = Math.max(0, heat + amount - 2);
+    crimeLock = now + CRIME_LOCK_MS;
     return wanted;
   }
 
@@ -344,210 +512,210 @@ export function createPolice(scene) {
   }
 
   // ---------------------------------------------------------------- AI helpers
-  function roadGuide(x, z, px, pz) {
+  function roadGuide(positionX, positionZ, playerX, playerZ) {
     // Follow the nearest road toward the player's axis. Cheap but reads as road driving.
-    const rx = snapRoad(x), rz = snapRoad(z);
-    const offX = Math.abs(x - rx), offZ = Math.abs(z - rz);
-    if (offX > ROAD_HALF + 2 && offZ > ROAD_HALF + 2) {
+    const roadX = snapRoad(positionX), roadZ = snapRoad(positionZ);
+    const offX = Math.abs(positionX - roadX), offZ = Math.abs(positionZ - roadZ);
+    if (offX > ROAD_HALF + ROAD_GUIDE_MARGIN && offZ > ROAD_HALF + ROAD_GUIDE_MARGIN) {
       // stuck inside a block: head for the nearest tarmac first
-      return offX < offZ ? { x: rx, z } : { x, z: rz };
+      return offX < offZ ? { x: roadX, z: positionZ } : { x: positionX, z: roadZ };
     }
     if (offX <= offZ) {
       // on a north-south road: run along it toward the player
-      const dz = pz - z;
-      return { x: rx, z: z + clamp(dz, -24, 24) };
+      const deltaZ = playerZ - positionZ;
+      return { x: roadX, z: positionZ + clamp(deltaZ, -GUIDE_STEP_LIMIT, GUIDE_STEP_LIMIT) };
     }
-    const dx = px - x;
-    return { x: x + clamp(dx, -24, 24), z: rz };
+    const deltaX = playerX - positionX;
+    return { x: positionX + clamp(deltaX, -GUIDE_STEP_LIMIT, GUIDE_STEP_LIMIT), z: roadZ };
   }
 
   function avoidCrowd(unit, steer) {
-    const x = unit.root.position.x, z = unit.root.position.z;
-    const fx = Math.sin(unit.heading), fz = Math.cos(unit.heading);
+    const posX = unit.root.position.x, posZ = unit.root.position.z;
+    const forwardX = Math.sin(unit.heading), forwardZ = Math.cos(unit.heading);
     for (const other of units) {
       if (other === unit || other.car.hp <= 0) continue;
-      const dx = other.root.position.x - x, dz = other.root.position.z - z;
-      const d = Math.hypot(dx, dz);
-      if (d > 8 || d < 0.01) continue;
-      const ahead = (dx * fx + dz * fz) / d;
-      if (ahead < 0.2) continue;
-      const side = Math.sign(dx * fz - dz * fx) || 1;
-      steer -= side * (8 - d) * 0.05;
-      unit.speed *= 0.985;
+      const offsetX = other.root.position.x - posX, offsetZ = other.root.position.z - posZ;
+      const distance = Math.hypot(offsetX, offsetZ);
+      if (distance > CROWD_RADIUS || distance < CROWD_MIN_DISTANCE) continue;
+      const ahead = (offsetX * forwardX + offsetZ * forwardZ) / distance;
+      if (ahead < CROWD_AHEAD_MIN) continue;
+      const side = Math.sign(offsetX * forwardZ - offsetZ * forwardX) || 1;
+      steer -= side * (CROWD_RADIUS - distance) * CROWD_STEER_FACTOR;
+      unit.speed *= CROWD_SPEED_DAMP;
     }
     // City blocks are implicit colliders: if a hull is ahead, hug the tarmac.
-    const lookX = x + fx * 7, lookZ = z + fz * 7;
-    const inBlock = Math.abs(lookX - snapRoad(lookX)) > ROAD_HALF + 1 &&
-      Math.abs(lookZ - snapRoad(lookZ)) > ROAD_HALF + 1 &&
-      Math.abs(lookX) < 220 && Math.abs(lookZ) < 210;
-    if (inBlock) steer += Math.sign(wrap(Math.atan2(snapRoad(lookX) - lookX, snapRoad(lookZ) - lookZ) - unit.heading)) * 0.4;
+    const lookX = posX + forwardX * BLOCK_LOOKAHEAD, lookZ = posZ + forwardZ * BLOCK_LOOKAHEAD;
+    const inBlock = Math.abs(lookX - snapRoad(lookX)) > ROAD_HALF + BLOCK_MARGIN &&
+      Math.abs(lookZ - snapRoad(lookZ)) > ROAD_HALF + BLOCK_MARGIN &&
+      Math.abs(lookX) < BLOCK_BOUND_X && Math.abs(lookZ) < BLOCK_BOUND_Z;
+    if (inBlock) steer += Math.sign(wrap(Math.atan2(snapRoad(lookX) - lookX, snapRoad(lookZ) - lookZ) - unit.heading)) * BLOCK_STEER_AMOUNT;
     return steer;
   }
 
-  function updateUnit(unit, dt, px, pz, player, damageFn) {
+  function updateUnit(unit, delta, playerX, playerZ, player, damageFn) {
     const car = unit.car;
-    const x = car.root.position.x, z = car.root.position.z;
-    const d = dist2(x, z, px, pz);
+    const posX = car.root.position.x, posZ = car.root.position.z;
+    const distance = dist2(posX, posZ, playerX, playerZ);
 
     if (car.hp <= 0) {
-      unit.speed *= 0.9;
-      car.root.rotation.z = Math.min(0.25, car.root.rotation.z + dt * 0.4);
+      unit.speed *= WRECK_SPEED_DECAY;
+      car.root.rotation.z = Math.min(WRECK_TILT_MAX, car.root.rotation.z + delta * WRECK_TILT_RATE);
       return;
     }
 
-    let tx = px, tz = pz;
-    if (d > 44) {
-      unit.wpAt -= dt;
+    let targetX = playerX, targetZ = playerZ;
+    if (distance > FAR_PURSUIT_DISTANCE) {
+      unit.wpAt -= delta;
       if (unit.wpAt <= 0) {
-        unit.wpAt = 0.55;
-        unit.wp = roadGuide(x, z, px, pz);
+        unit.wpAt = WAYPOINT_REFRESH;
+        unit.wp = roadGuide(posX, posZ, playerX, playerZ);
       }
-      tx = unit.wp.x;
-      tz = unit.wp.z;
+      targetX = unit.wp.x;
+      targetZ = unit.wp.z;
     } else {
       // lead a moving target and set up PIT angles when close
-      if (player.car && d < 30) {
-        const ch = player.car.root.rotation.y, cs = player.car.speed || 0;
-        tx += Math.sin(ch) * cs * 0.28;
-        tz += Math.cos(ch) * cs * 0.28;
-        if (d < 17 && d > 5) {
+      if (player.car && distance < LEAD_DISTANCE) {
+        const chaseHeading = player.car.root.rotation.y, chaseSpeed = player.car.speed || 0;
+        targetX += Math.sin(chaseHeading) * chaseSpeed * LEAD_FACTOR;
+        targetZ += Math.cos(chaseHeading) * chaseSpeed * LEAD_FACTOR;
+        if (distance < PIT_NEAR && distance > PIT_FAR) {
           const side = unit.pitSide;
-          tx += Math.cos(ch) * side * 4.2;
-          tz -= Math.sin(ch) * side * 4.2;
+          targetX += Math.cos(chaseHeading) * side * PIT_OFFSET;
+          targetZ -= Math.sin(chaseHeading) * side * PIT_OFFSET;
         }
       }
     }
 
-    const want = Math.atan2(tx - x, tz - z);
-    let steer = wrap(want - unit.heading);
+    const desiredHeading = Math.atan2(targetX - posX, targetZ - posZ);
+    let steer = wrap(desiredHeading - unit.heading);
     steer = avoidCrowd(unit, steer);
 
-    const turnRate = 2.35 * clamp(0.35 + Math.abs(unit.speed) / 16, 0.35, 1.5);
-    unit.heading += clamp(steer, -turnRate * dt, turnRate * dt);
+    const turnRate = BASE_TURN_RATE * clamp(TURN_FACTOR_MIN + Math.abs(unit.speed) / TURN_SPEED_REF, TURN_FACTOR_MIN, TURN_FACTOR_MAX);
+    unit.heading += clamp(steer, -turnRate * delta, turnRate * delta);
 
-    let target = 13 + wanted * 4.6;
-    if (d < 26) target = player.car ? 10 + wanted * 3.4 : 6.5;
-    if (Math.abs(steer) > 1.15) target *= 0.58;
+    let targetSpeed = BASE_CHASE_SPEED + wanted * SPEED_PER_STAR;
+    if (distance < CLOSE_DISTANCE) targetSpeed = player.car ? CLOSE_CAR_SPEED + wanted * CLOSE_CAR_PER_STAR : CLOSE_FOOT_SPEED;
+    if (Math.abs(steer) > CORNER_ANGLE) targetSpeed *= CORNER_SPEED_FACTOR;
     if (unit.reverse > 0) {
-      unit.reverse -= dt;
-      target = -6;
+      unit.reverse -= delta;
+      targetSpeed = REVERSE_SPEED;
     }
-    target *= unit.aggression;
+    targetSpeed *= unit.aggression;
 
-    if (unit.reverse <= 0 && Math.abs(steer) > 2.4 && unit.speed > 4) {
-      unit.stuck += dt;
-      if (unit.stuck > 1.3) {
-        unit.reverse = 0.9 + Math.random() * 0.5;
+    if (unit.reverse <= 0 && Math.abs(steer) > STUCK_ANGLE && unit.speed > STUCK_SPEED) {
+      unit.stuck += delta;
+      if (unit.stuck > STUCK_TIME) {
+        unit.reverse = REVERSE_BASE + Math.random() * REVERSE_RANGE;
         unit.stuck = 0;
-        unit.heading += (Math.random() - 0.5) * 0.8;
+        unit.heading += (Math.random() - 0.5) * HEADING_JITTER;
       }
     } else {
-      unit.stuck = Math.max(0, unit.stuck - dt);
+      unit.stuck = Math.max(0, unit.stuck - delta);
     }
 
-    unit.speed += (target - unit.speed) * Math.min(1, dt * 2.6);
-    const nx = x + Math.sin(unit.heading) * unit.speed * dt;
-    const nz = z + Math.cos(unit.heading) * unit.speed * dt;
-    car.root.position.x = clamp(nx, -226, 226);
-    car.root.position.z = clamp(nz, -226, 226);
+    unit.speed += (targetSpeed - unit.speed) * Math.min(1, delta * SPEED_SMOOTH_RATE);
+    const nextX = posX + Math.sin(unit.heading) * unit.speed * delta;
+    const nextZ = posZ + Math.cos(unit.heading) * unit.speed * delta;
+    car.root.position.x = clamp(nextX, -UNIT_BOUND, UNIT_BOUND);
+    car.root.position.z = clamp(nextZ, -UNIT_BOUND, UNIT_BOUND);
     car.root.rotation.y = unit.heading;
-    car.root.position.y = 0.55 + Math.sin(performance.now() * 0.012 + unit.pitSide) * Math.min(0.03, Math.abs(unit.speed) * 0.001);
-    for (const wheel of car.wheels || []) wheel.rotation.x += unit.speed * dt * 1.4;
+    car.root.position.y = CAR_RIDE_HEIGHT + Math.sin(performance.now() * BOB_RATE + unit.pitSide) * Math.min(BOB_MAX, Math.abs(unit.speed) * BOB_PER_SPEED);
+    for (const wheel of car.wheels || []) wheel.rotation.x += unit.speed * delta * WHEEL_SPIN_FACTOR;
 
     // Sirens: alternate the roof bar. Cheap, and it sells the chase at night.
     if (car.bar) {
-      const phase = ((tick * 3 + unit.lit * 1.5) % 2) < 1;
+      const phase = ((tick * SIREN_FLASH_RATE + unit.lit * SIREN_FLASH_OFFSET) % 2) < 1;
       car.bar.material.color.copy(phase ? sirenMatA.color : sirenMatB.color);
     }
 
     // Contact: ram the player's car, or brake and bail out against a pedestrian.
-    if (d < (player.car ? 5.4 : 4.6) && unit.speed > 2) {
-      if (typeof damageFn === 'function') damageFn((player.car ? 8 : 5) * dt * clamp(unit.speed / 18, 0.3, 1.6));
-      if (player.car && typeof VEHICLES.damageVehicle === 'function') VEHICLES.damageVehicle(player.car, 12 * dt);
+    if (distance < (player.car ? RAM_CAR_DIST : RAM_FOOT_DIST) && unit.speed > RAM_MIN_SPEED) {
+      if (typeof damageFn === 'function') damageFn((player.car ? RAM_CAR_DAMAGE : RAM_FOOT_DAMAGE) * delta * clamp(unit.speed / RAM_SPEED_REF, RAM_FACTOR_MIN, RAM_FACTOR_MAX));
+      if (player.car && typeof VEHICLES.damageVehicle === 'function') VEHICLES.damageVehicle(player.car, CAR_RAM_DAMAGE * delta);
       if (!player.car && arrestCop === null) arrestCop = unit;
     }
 
-    if (wanted >= 3 && d < 26 && unit.speed < 24) {
-      unit.fireCd = (unit.fireCd || 0) - dt;
+    if (wanted >= 3 && distance < SHOOT_DISTANCE && unit.speed < SHOOT_MAX_SPEED) {
+      unit.fireCd = (unit.fireCd || 0) - delta;
       if (unit.fireCd <= 0) {
-        unit.fireCd = 1.3 + Math.random() * 0.6;
-        if (typeof damageFn === 'function') damageFn(3 + Math.random() * 2.5);
+        unit.fireCd = UNIT_FIRE_BASE + Math.random() * UNIT_FIRE_RANGE;
+        if (typeof damageFn === 'function') damageFn(SHOOT_DAMAGE_BASE + Math.random() * SHOOT_DAMAGE_RANGE);
       }
     }
   }
 
-  function updateFoot(cop, dt, px, pz, player, damageFn) {
+  function updateFoot(cop, delta, playerX, playerZ, player, damageFn) {
     const mesh = cop.mesh;
-    const x = mesh.position.x, z = mesh.position.z;
-    const d = dist2(x, z, px, pz);
-    if (d > 110) {
-      mesh.position.set(px + (Math.random() - 0.5) * 40, 0, pz + 30);
+    const posX = mesh.position.x, posZ = mesh.position.z;
+    const distance = dist2(posX, posZ, playerX, playerZ);
+    if (distance > TELEPORT_DISTANCE) {
+      mesh.position.set(playerX + (Math.random() - 0.5) * TELEPORT_SPREAD, 0, playerZ + TELEPORT_AHEAD);
       return;
     }
-    cop.phase += dt * (d > 12 ? 7 : 2);
-    let step = 0;
-    if (d > 8.5) step = cop.speed * dt;
-    else if (d < 5) step = -1.2 * dt;
-    if (step !== 0) {
-      cop.heading = Math.atan2(px - x, pz - z);
-      mesh.position.x += Math.sin(cop.heading) * step;
-      mesh.position.z += Math.cos(cop.heading) * step;
+    cop.phase += delta * (distance > RUN_DISTANCE_THRESHOLD ? RUN_PHASE_RATE : WALK_PHASE_RATE);
+    let moveAmount = 0;
+    if (distance > APPROACH_DISTANCE) moveAmount = cop.speed * delta;
+    else if (distance < RETREAT_DISTANCE) moveAmount = -RETREAT_SPEED * delta;
+    if (moveAmount !== 0) {
+      cop.heading = Math.atan2(playerX - posX, playerZ - posZ);
+      mesh.position.x += Math.sin(cop.heading) * moveAmount;
+      mesh.position.z += Math.cos(cop.heading) * moveAmount;
       mesh.rotation.y = cop.heading;
     }
-    const swing = d > 8.5 ? Math.sin(cop.phase) * 0.55 : 0;
+    const swing = distance > APPROACH_DISTANCE ? Math.sin(cop.phase) * LEG_SWING_AMOUNT : 0;
     if (cop.legs) {
       cop.legs[0].rotation.x = swing;
       cop.legs[1].rotation.x = -swing;
     }
-    cop.fireCd -= dt;
-    if (d < 26 && cop.fireCd <= 0) {
-      cop.fireCd = 1.5 + Math.random() * 0.8;
-      if (typeof damageFn === 'function') damageFn(4 + Math.random() * 3);
+    cop.fireCd -= delta;
+    if (distance < FOOT_FIRE_DISTANCE && cop.fireCd <= 0) {
+      cop.fireCd = FOOT_FIRE_BASE + Math.random() * FOOT_FIRE_RANGE;
+      if (typeof damageFn === 'function') damageFn(FOOT_DAMAGE_BASE + Math.random() * FOOT_DAMAGE_RANGE);
     }
-    if (d < 4.4 && arrestCop === null) arrestCop = cop;
+    if (distance < FOOT_ARREST_DISTANCE && arrestCop === null) arrestCop = cop;
   }
 
-  function updateHeli(dt, px, pz) {
+  function updateHeli(delta, playerX, playerZ) {
     if (!heli) return;
-    heli.angle += dt * 0.34;
-    const radius = 23 + Math.sin(tick * 0.2) * 4;
-    const x = px + Math.sin(heli.angle) * radius;
-    const z = pz + Math.cos(heli.angle) * radius;
-    const g = heli.group;
-    g.position.x += (x - g.position.x) * Math.min(1, dt * 1.2);
-    g.position.z += (z - g.position.z) * Math.min(1, dt * 1.2);
-    g.position.y += (30 + Math.sin(tick * 0.6) * 2.2 - g.position.y) * Math.min(1, dt * 0.9);
-    g.rotation.y += (Math.atan2(px - g.position.x, pz - g.position.z) - g.rotation.y) * Math.min(1, dt * 1.5);
-    g.rotation.z = Math.sin(tick * 0.8) * 0.04;
-    heli.rotor.rotation.y += dt * 26;
-    heli.tailRotor.rotation.x += dt * 32;
-    heli.target.position.set(px, 0, pz);
+    heli.angle += delta * HELI_ANGLE_RATE;
+    const radius = HELI_ORBIT_RADIUS + Math.sin(tick * HELI_RADIUS_RATE) * HELI_RADIUS_SWING;
+    const orbitX = playerX + Math.sin(heli.angle) * radius;
+    const orbitZ = playerZ + Math.cos(heli.angle) * radius;
+    const group = heli.group;
+    group.position.x += (orbitX - group.position.x) * Math.min(1, delta * HELI_FOLLOW_RATE);
+    group.position.z += (orbitZ - group.position.z) * Math.min(1, delta * HELI_FOLLOW_RATE);
+    group.position.y += (HELI_HEIGHT + Math.sin(tick * HELI_HEIGHT_RATE) * HELI_HEIGHT_SWING - group.position.y) * Math.min(1, delta * HELI_VERTICAL_RATE);
+    group.rotation.y += (Math.atan2(playerX - group.position.x, playerZ - group.position.z) - group.rotation.y) * Math.min(1, delta * HELI_TURN_RATE);
+    group.rotation.z = Math.sin(tick * HELI_BANK_RATE) * HELI_BANK_AMOUNT;
+    heli.rotor.rotation.y += delta * ROTOR_SPEED;
+    heli.tailRotor.rotation.x += delta * TAIL_ROTOR_SPEED;
+    heli.target.position.set(playerX, 0, playerZ);
     heli.light.target = heli.target;
-    const blink = (tick * 2.4) % 1 < 0.5;
-    heli.beaconR.material.color.setHex(blink ? 0xff2d3d : 0x3a0a0e);
-    heli.beaconB.material.color.setHex(blink ? 0x0d2361 : 0x3d7bff);
-    heli.shaft.material.opacity = 0.055 + Math.sin(tick * 3.1) * 0.02;
+    const blink = (tick * HELI_BLINK_RATE) % 1 < 0.5;
+    heli.beaconR.material.color.setHex(blink ? SIREN_RED : BEACON_RED_OFF);
+    heli.beaconB.material.color.setHex(blink ? BEACON_BLUE_OFF : SIREN_BLUE);
+    heli.shaft.material.opacity = SHAFT_BASE_OPACITY + Math.sin(tick * SHAFT_PULSE_RATE) * SHAFT_PULSE_AMOUNT;
   }
 
   // ---------------------------------------------------------------- main step
-  function step(dt, pos, player, damageFn) {
-    dt = clamp(Number(dt) || 0, 0, 0.06);
+  function step(delta, pos, player, damageFn) {
+    delta = clamp(Number(delta) || 0, 0, MAX_STEP_DELTA);
     if (!pos) return;
-    tick += dt;
-    if (busted > 0) busted = Math.max(0, busted - dt);
+    tick += delta;
+    if (busted > 0) busted = Math.max(0, busted - delta);
 
-    const px = pos.x, pz = pos.z;
-    if (dt > 0) {
-      playerSpeed += (dist2(px, pz, lastPlayer.x, lastPlayer.z) / dt - playerSpeed) * Math.min(1, dt * 6);
+    const playerX = pos.x, playerZ = pos.z;
+    if (delta > 0) {
+      playerSpeed += (dist2(playerX, playerZ, lastPlayer.x, lastPlayer.z) / delta - playerSpeed) * Math.min(1, delta * PLAYER_SPEED_SMOOTH);
     }
-    lastPlayer = { x: px, z: pz };
+    lastPlayer = { x: playerX, z: playerZ };
 
     // Queued heat from a burst of crimes promotes one level at a time.
     if (heat > 0 && performance.now() >= crimeLock) {
-      const add = Math.min(1, heat);
-      heat -= add;
-      applyCrime(add);
-      crimeLock = performance.now() + 1300;
+      const heatStep = Math.min(1, heat);
+      heat -= heatStep;
+      applyCrime(heatStep);
+      crimeLock = performance.now() + HEAT_LOCK_MS;
     }
 
     if (!wanted) {
@@ -559,75 +727,75 @@ export function createPolice(scene) {
     if (arrestCop && (!units.includes(arrestCop) && !foot.includes(arrestCop))) arrestCop = null;
 
     // Dispatch strength and reinforcements.
-    dispatch -= dt;
+    dispatch -= delta;
     if (dispatch <= 0) {
-      dispatch = 1.35;
+      dispatch = DISPATCH_INTERVAL;
       while (units.length < DESIRED_CARS[wanted]) {
-        const pt = spawnPoint(px, pz, 50, 110);
-        addUnit(pt.x, pt.z, Math.atan2(px - pt.x, pz - pt.z));
+        const point = spawnPoint(playerX, playerZ, DISPATCH_MIN_DIST, DISPATCH_MAX_DIST);
+        addUnit(point.x, point.z, Math.atan2(playerX - point.x, playerZ - point.z));
       }
-      if (foot.length < DESIRED_FOOT[wanted] && wanted <= 3) spawnFootCop(px, pz);
+      if (foot.length < DESIRED_FOOT[wanted] && wanted <= 3) spawnFootCop(playerX, playerZ);
     }
     if (wanted >= 3) {
-      roadblockCd -= dt;
-      if (roadblockCd <= 0 && blockGroups.length < 2) {
+      roadblockCd -= delta;
+      if (roadblockCd <= 0 && blockGroups.length < MAX_BLOCK_GROUPS) {
         const travel = player.car ? player.car.root.rotation.y : 0;
-        spawnRoadblock(px, pz, travel);
-        roadblockCd = 24;
+        spawnRoadblock(playerX, playerZ, travel);
+        roadblockCd = ROADBLOCK_INTERVAL;
       }
     } else {
-      roadblockCd = Math.max(roadblockCd, 8);
+      roadblockCd = Math.max(roadblockCd, ROADBLOCK_MIN_CD);
     }
     if (wanted >= 4 && !heli) spawnHeli();
 
-    for (let i = units.length - 1; i >= 0; i--) {
-      const u = units[i];
-      if (dist2(u.root.position.x, u.root.position.z, px, pz) > 285) {
-        removeCar(u.car);
-        units.splice(i, 1);
+    for (let unitIndex = units.length - 1; unitIndex >= 0; unitIndex--) {
+      const unit = units[unitIndex];
+      if (dist2(unit.root.position.x, unit.root.position.z, playerX, playerZ) > DESPAWN_DISTANCE) {
+        removeCar(unit.car);
+        units.splice(unitIndex, 1);
         continue;
       }
-      updateUnit(u, dt, px, pz, player, damageFn);
+      updateUnit(unit, delta, playerX, playerZ, player, damageFn);
     }
-    for (let i = foot.length - 1; i >= 0; i--) {
-      const f = foot[i];
-      updateFoot(f, dt, px, pz, player, damageFn);
-      if (dist2(f.mesh.position.x, f.mesh.position.z, px, pz) > 160) {
-        scene.remove(f.mesh);
-        foot.splice(i, 1);
+    for (let copIndex = foot.length - 1; copIndex >= 0; copIndex--) {
+      const cop = foot[copIndex];
+      updateFoot(cop, delta, playerX, playerZ, player, damageFn);
+      if (dist2(cop.mesh.position.x, cop.mesh.position.z, playerX, playerZ) > FOOT_DESPAWN) {
+        scene.remove(cop.mesh);
+        foot.splice(copIndex, 1);
       }
     }
-    updateHeli(dt, px, pz);
+    updateHeli(delta, playerX, playerZ);
 
     // Roadblocks expire or are left behind.
-    for (let i = blockGroups.length - 1; i >= 0; i--) {
-      const g = blockGroups[i];
-      g.until -= dt;
-      const cx = g.cars[1] ? g.cars[1].root.position.x : px;
-      const cz = g.cars[1] ? g.cars[1].root.position.z : pz;
-      if (g.until <= 0 || dist2(cx, cz, px, pz) > 150) {
-        for (const car of g.cars) {
-          const idx = roadblock.indexOf(car);
-          if (idx >= 0) roadblock.splice(idx, 1);
+    for (let groupIndex = blockGroups.length - 1; groupIndex >= 0; groupIndex--) {
+      const blockGroup = blockGroups[groupIndex];
+      blockGroup.until -= delta;
+      const centerX = blockGroup.cars[1] ? blockGroup.cars[1].root.position.x : playerX;
+      const centerZ = blockGroup.cars[1] ? blockGroup.cars[1].root.position.z : playerZ;
+      if (blockGroup.until <= 0 || dist2(centerX, centerZ, playerX, playerZ) > BLOCK_DESPAWN_DIST) {
+        for (const car of blockGroup.cars) {
+          const blockIndex = roadblock.indexOf(car);
+          if (blockIndex >= 0) roadblock.splice(blockIndex, 1);
           removeCar(car);
         }
-        blockGroups.splice(i, 1);
+        blockGroups.splice(groupIndex, 1);
       }
     }
 
     // Anyone touching the player keeps the arrest timer alive.
     if (!player.car) {
-      const nearCar = units.find((u) => u.car.hp > 0 && dist2(u.root.position.x, u.root.position.z, px, pz) < 4.9);
-      const nearFoot = foot.find((f) => dist2(f.mesh.position.x, f.mesh.position.z, px, pz) < 4.2);
-      const slow = playerSpeed < 3.4 || player.crouch;
-      if ((nearCar || nearFoot) && slow && wanted > 0) {
-        arrest += dt;
+      const nearCar = units.find((unit) => unit.car.hp > 0 && dist2(unit.root.position.x, unit.root.position.z, playerX, playerZ) < ARREST_CAR_DIST);
+      const nearFoot = foot.find((cop) => dist2(cop.mesh.position.x, cop.mesh.position.z, playerX, playerZ) < ARREST_FOOT_DIST);
+      const isSlow = playerSpeed < ARREST_SLOW_SPEED || player.crouch;
+      if ((nearCar || nearFoot) && isSlow && wanted > 0) {
+        arrest += delta;
       } else {
-        arrest = Math.max(0, arrest - dt * 1.6);
+        arrest = Math.max(0, arrest - delta * ARREST_DECAY_RATE);
       }
       if (arrest >= ARREST_TIME) {
         arrest = 0;
-        busted = 3;
+        busted = BUSTED_DURATION;
         events.push('BUSTED');
         const callback = api.onArrest;
         if (typeof callback === 'function') {
@@ -639,22 +807,22 @@ export function createPolice(scene) {
         }
       }
     } else {
-      arrest = Math.max(0, arrest - dt * 2);
+      arrest = Math.max(0, arrest - delta * ARREST_CAR_DECAY_RATE);
     }
 
     // Breaking line of sight: stay out of everyone's range and the heat cools a level at a time.
     let seen = false;
-    for (const u of units) if (u.car.hp > 0 && dist2(u.root.position.x, u.root.position.z, px, pz) < 58) seen = true;
-    for (const f of foot) if (dist2(f.mesh.position.x, f.mesh.position.z, px, pz) < 48) seen = true;
-    if (heli && dist2(heli.group.position.x, heli.group.position.z, px, pz) < 78) seen = true;
+    for (const unit of units) if (unit.car.hp > 0 && dist2(unit.root.position.x, unit.root.position.z, playerX, playerZ) < SEEN_CAR_DIST) seen = true;
+    for (const cop of foot) if (dist2(cop.mesh.position.x, cop.mesh.position.z, playerX, playerZ) < SEEN_FOOT_DIST) seen = true;
+    if (heli && dist2(heli.group.position.x, heli.group.position.z, playerX, playerZ) < SEEN_HELI_DIST) seen = true;
     if (seen) {
       evade = 0;
       decay = 0;
     } else {
-      evade += dt;
-      if (evade > 5.5) {
-        decay += dt;
-        if (decay > 7.5) {
+      evade += delta;
+      if (evade > EVADE_DELAY) {
+        decay += delta;
+        if (decay > HEAT_DECAY_TIME) {
           decay = 0;
           wanted = Math.max(0, wanted - 1);
           if (wanted === 0) {

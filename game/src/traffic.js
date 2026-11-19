@@ -25,6 +25,75 @@ const DESPAWN = 228;
 const TAILGATE = 3.0;
 const LIGHT_PERIOD = 18;
 
+const TRAFFIC_SEED_XOR = 0x5eed;
+const CAR_RIDE_HEIGHT = 0.55;
+const FAR_DISTANCE = 999;
+const NODE_AHEAD_EPSILON = 5;
+const TURN_LEFT_CHANCE = 0.2;
+const TURN_RIGHT_CHANCE = 0.4;
+const MAP_EDGE_LIMIT = 205;
+const PLAYER_NEAR_DISTANCE = 22;
+const SPAWN_ATTEMPTS = 26;
+const SPAWN_COORD_RANGE = 165;
+const SPAWN_EDGE_LIMIT = 190;
+const JUNCTION_CLEARANCE = 7;
+const SPAWN_CAR_SPACING = 13;
+const POLICE_SPAWN_CHANCE = 0.05;
+const TRUCK_SPEED_FACTOR = 0.8;
+const SPORTS_SPEED_FACTOR = 1.15;
+const INITIAL_HORN_COOLDOWN = 2;
+const HORN_BASE_COOLDOWN = 1;
+const HORN_COORD_MODULO = 3;
+const HONK_MIN_GAP = 0.9;
+const HORN_NEVER = -9;
+const HORN_BLOCKED_SECONDS = 1.4;
+const HORN_COOLDOWN_BASE = 3.5;
+const HORN_COOLDOWN_RANDOM = 4;
+const RECYCLE_INTERVAL = 0.6;
+// Local light cycle thresholds (seconds into LIGHT_PERIOD), per axis.
+const AXIS0_GREEN_END = 6.5;
+const AXIS0_YELLOW_END = 8;
+const AXIS1_RED_END = 9.5;
+const AXIS1_GREEN_END = 16.5;
+// Arrival and overshoot detection at intersections.
+const ARRIVE_DISTANCE = 3.4;
+const OVERSHOOT_MARGIN = 0.35;
+const OVERSHOOT_WINDOW = 11;
+// Steering feel.
+const BASE_TURN_RATE = 2.0;
+const SPEED_TURN_BONUS = 1.4;
+const TURN_SPEED_FACTOR = 0.05;
+const LOW_SPEED_TURN_FLOOR = 0.55;
+const LOW_SPEED_TURN_RANGE = 0.45;
+const TURN_SPEED_REF = 5;
+const CORNER_SLOW_ANGLE = 0.32;
+const CORNER_SLOW_FACTOR = 0.46;
+const SHARP_TURN_ANGLE = 0.9;
+const SHARP_TURN_SPEED = 5.5;
+const STEER_VISUAL_SCALE = 1.6;
+const BRAKE_THRESHOLD = 0.2;
+// Traffic lights ahead.
+const LIGHT_APPROACH_DIST = 11;
+const YELLOW_STOP_DIST = 6.5;
+const STOP_LINE_OFFSET = 6.2;
+const STOP_SPEED_SCALE = 1.5;
+// Queuing behind other cars and yielding to the player.
+const AHEAD_EPSILON = 0.2;
+const FOLLOW_LOOKAHEAD = 17;
+const LANE_HALF_WIDTH = 2.9;
+const PLAYER_CAR_LOOKAHEAD = 15;
+const PLAYER_CAR_HALF_WIDTH = 3.4;
+const PLAYER_CAR_CLEARANCE = 5.4;
+const PLAYER_FOOT_LOOKAHEAD = 13;
+const PLAYER_FOOT_HALF_WIDTH = 2.8;
+const PLAYER_FOOT_CLEARANCE = 3.2;
+const GAP_SLOW_RANGE = 22;
+const GAP_BUFFER = 1;
+const GAP_SPEED_SCALE = 1.35;
+const BLOCKED_SPEED_THRESHOLD = 0.25;
+const BLOCKED_CREEP_SPEED = 0.9;
+const BLOCKED_DECAY_RATE = 2.2;
+
 /** Three speed profiles, plus the body types that show up in ambient traffic. */
 const PROFILES = [
   { cruise: 7.5, accel: 4.0, brake: 7.0 },
@@ -34,13 +103,13 @@ const PROFILES = [
 const TYPES = ['sedan', 'sedan', 'sedan', 'taxi', 'van', 'sports', 'sedan', 'truck'];
 const PAINTS = [0x2f9f97, 0xe8e2d2, 0xc45a4a, 0x4a6ea8, 0xd9b061, 0x8a8f7a, 0x384049, 0x9c5c74, 0x6f8f6a];
 
-const wrapAngle = (a) => {
-  let x = a;
-  while (x > Math.PI) x -= Math.PI * 2;
-  while (x < -Math.PI) x += Math.PI * 2;
-  return x;
+const wrapAngle = (angle) => {
+  let wrapped = angle;
+  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+  return wrapped;
 };
-const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const clamp = (value, min, max) => (value < min ? min : value > max ? max : value);
 
 function laneOffset(axis, dir) {
   // Right-hand traffic: along +x keep to -z, along +z keep to +x.
@@ -54,51 +123,51 @@ function headingFor(axis, dir) {
   return dir > 0 ? 0 : Math.PI;
 }
 function nextNodeAhead(coord, dir) {
-  const n = Math.round(coord / BLOCK) * BLOCK;
-  if (dir > 0) return n > coord + 5 ? n : n + BLOCK;
-  return n < coord - 5 ? n : n - BLOCK;
+  const nearestNode = Math.round(coord / BLOCK) * BLOCK;
+  if (dir > 0) return nearestNode > coord + NODE_AHEAD_EPSILON ? nearestNode : nearestNode + BLOCK;
+  return nearestNode < coord - NODE_AHEAD_EPSILON ? nearestNode : nearestNode - BLOCK;
 }
 
 function setTarget(car) {
-  const t = car.traffic;
-  if (t.axis === 0) {
-    t.target.x = t.nextNode;
-    t.target.z = laneCoord(t.line, 0, t.dir);
+  const trafficState = car.traffic;
+  if (trafficState.axis === 0) {
+    trafficState.target.x = trafficState.nextNode;
+    trafficState.target.z = laneCoord(trafficState.line, 0, trafficState.dir);
   } else {
-    t.target.x = laneCoord(t.line, 1, t.dir);
-    t.target.z = t.nextNode;
+    trafficState.target.x = laneCoord(trafficState.line, 1, trafficState.dir);
+    trafficState.target.z = trafficState.nextNode;
   }
 }
 
 /** The car reached its intersection: go straight, or pick a random turn. */
 function advance(car, random) {
-  const t = car.traffic;
-  const node = t.nextNode;
+  const trafficState = car.traffic;
+  const node = trafficState.nextNode;
   let turn = 0;
   const roll = random();
-  if (roll < 0.2) turn = -1;
-  else if (roll < 0.4) turn = 1;
+  if (roll < TURN_LEFT_CHANCE) turn = -1;
+  else if (roll < TURN_RIGHT_CHANCE) turn = 1;
 
   // Never drive off the end of a road: force a turn at the edge of the grid.
-  if (Math.abs(node + t.dir * BLOCK) > LIMIT * BLOCK) turn = t.dir > 0 ? 1 : -1;
+  if (Math.abs(node + trafficState.dir * BLOCK) > LIMIT * BLOCK) turn = trafficState.dir > 0 ? 1 : -1;
 
   if (turn === 0) {
-    t.nextNode = node + t.dir * BLOCK;
+    trafficState.nextNode = node + trafficState.dir * BLOCK;
     setTarget(car);
     return;
   }
-  const fx = t.axis === 0 ? t.dir : 0;
-  const fz = t.axis === 1 ? t.dir : 0;
-  const rx = fz;
-  const rz = -fx;
-  const nx = turn > 0 ? rx : -rx;
-  const nz = turn > 0 ? rz : -rz;
-  const axis = nx !== 0 ? 0 : 1;
-  const dir = nx !== 0 ? nx : nz;
-  t.axis = axis;
-  t.dir = dir;
-  t.line = clamp(Math.round(node / BLOCK), -LIMIT, LIMIT);
-  t.nextNode = node + dir * BLOCK;
+  const forwardX = trafficState.axis === 0 ? trafficState.dir : 0;
+  const forwardZ = trafficState.axis === 1 ? trafficState.dir : 0;
+  const rightX = forwardZ;
+  const rightZ = -forwardX;
+  const turnX = turn > 0 ? rightX : -rightX;
+  const turnZ = turn > 0 ? rightZ : -rightZ;
+  const axis = turnX !== 0 ? 0 : 1;
+  const dir = turnX !== 0 ? turnX : turnZ;
+  trafficState.axis = axis;
+  trafficState.dir = dir;
+  trafficState.line = clamp(Math.round(node / BLOCK), -LIMIT, LIMIT);
+  trafficState.nextNode = node + dir * BLOCK;
   setTarget(car);
 }
 
@@ -107,38 +176,38 @@ function place(car, axis, dir, line, coord) {
   line = clamp(Math.round(line), -LIMIT, LIMIT);
   car.root.position.x = axis === 0 ? coord : laneCoord(line, 1, dir);
   car.root.position.z = axis === 0 ? laneCoord(line, 0, dir) : coord;
-  car.root.position.y = 0.55;
+  car.root.position.y = CAR_RIDE_HEIGHT;
   car.root.rotation.y = headingFor(axis, dir);
-  const t = car.traffic;
-  t.axis = axis;
-  t.dir = dir;
-  t.line = line;
-  t.nextNode = nextNodeAhead(coord, dir);
-  t.target = t.target || { x: 0, z: 0 };
-  t.blocked = 0;
-  t.hornCooldown = 1 + (coord % 3);
-  t.lastDist = 999;
-  t.resume = false;
+  const trafficState = car.traffic;
+  trafficState.axis = axis;
+  trafficState.dir = dir;
+  trafficState.line = line;
+  trafficState.nextNode = nextNodeAhead(coord, dir);
+  trafficState.target = trafficState.target || { x: 0, z: 0 };
+  trafficState.blocked = 0;
+  trafficState.hornCooldown = HORN_BASE_COOLDOWN + (coord % HORN_COORD_MODULO);
+  trafficState.lastDist = FAR_DISTANCE;
+  trafficState.resume = false;
   setTarget(car);
 }
 
 /** Recover the nearest lane after the player abandons a hijacked car. */
 function resumeLane(car) {
-  const p = car.root.position;
+  const position = car.root.position;
   const yaw = car.root.rotation.y;
-  const dzRoad = Math.abs(p.z - Math.round(p.z / BLOCK) * BLOCK);
-  const dxRoad = Math.abs(p.x - Math.round(p.x / BLOCK) * BLOCK);
+  const dzRoad = Math.abs(position.z - Math.round(position.z / BLOCK) * BLOCK);
+  const dxRoad = Math.abs(position.x - Math.round(position.x / BLOCK) * BLOCK);
   const axis = dzRoad <= dxRoad ? 0 : 1;
   const dir = axis === 0 ? (Math.sin(yaw) >= 0 ? 1 : -1) : (Math.cos(yaw) >= 0 ? 1 : -1);
-  const line = axis === 0 ? p.z / BLOCK : p.x / BLOCK;
-  const coord = axis === 0 ? p.x : p.z;
-  const t = car.traffic;
-  t.axis = axis;
-  t.dir = dir;
-  t.line = clamp(Math.round(line), -LIMIT, LIMIT);
-  t.nextNode = nextNodeAhead(coord, dir);
-  t.blocked = 0;
-  t.lastDist = 999;
+  const line = axis === 0 ? position.z / BLOCK : position.x / BLOCK;
+  const coord = axis === 0 ? position.x : position.z;
+  const trafficState = car.traffic;
+  trafficState.axis = axis;
+  trafficState.dir = dir;
+  trafficState.line = clamp(Math.round(line), -LIMIT, LIMIT);
+  trafficState.nextNode = nextNodeAhead(coord, dir);
+  trafficState.blocked = 0;
+  trafficState.lastDist = FAR_DISTANCE;
   car.speed = Math.abs(car.speed || 0);
   setTarget(car);
 }
@@ -148,9 +217,9 @@ function resumeLane(car) {
  * array it wins; otherwise a local 18 second cycle runs both axes.
  */
 function ownLight(axis, time) {
-  const p = ((time % LIGHT_PERIOD) + LIGHT_PERIOD) % LIGHT_PERIOD;
-  if (axis === 0) return p < 6.5 ? 'green' : p < 8 ? 'yellow' : 'red';
-  return p < 9.5 ? 'red' : p < 16.5 ? 'green' : 'yellow';
+  const phase = ((time % LIGHT_PERIOD) + LIGHT_PERIOD) % LIGHT_PERIOD;
+  if (axis === 0) return phase < AXIS0_GREEN_END ? 'green' : phase < AXIS0_YELLOW_END ? 'yellow' : 'red';
+  return phase < AXIS1_RED_END ? 'red' : phase < AXIS1_GREEN_END ? 'green' : 'yellow';
 }
 
 function cityLight(city, axis, time) {
@@ -162,8 +231,8 @@ function cityLight(city, axis, time) {
     if (state === false) return 'red';
   }
   if (Array.isArray(city.trafficLights)) {
-    for (let i = 0; i < city.trafficLights.length; i += 1) {
-      const light = city.trafficLights[i];
+    for (let index = 0; index < city.trafficLights.length; index += 1) {
+      const light = city.trafficLights[index];
       if (!light) continue;
       const lightAxis = light.axis;
       if (lightAxis !== axis && lightAxis !== (axis === 0 ? 'x' : 'z')) continue;
@@ -177,16 +246,16 @@ function cityLight(city, axis, time) {
 }
 
 /** Build one ambient car (also used for police-chase traffic). */
-export function makeTrafficCar(scene, type = 'sedan', x = 0, z = 0, angle = 0, color) {
-  const car = makeCar(scene, x, z, color, type === 'police', type);
-  car.root.rotation.y = angle;
+export function makeTrafficCar(scene, type = 'sedan', positionX = 0, positionZ = 0, heading = 0, color) {
+  const car = makeCar(scene, positionX, positionZ, color, type === 'police', type);
+  car.root.rotation.y = heading;
   car.ai = 'traffic';
   return car;
 }
 
 /** Create the ambient traffic system. `city` is optional (lights/colliders). */
 export function createTraffic(scene, city) {
-  const random = createRandom(((city && city.seed) || CITY.seed) ^ 0x5eed);
+  const random = createRandom(((city && city.seed) || CITY.seed) ^ TRAFFIC_SEED_XOR);
   const cars = [];
   if (city) setWorld(city);
   const traffic = {
@@ -202,22 +271,22 @@ export function createTraffic(scene, city) {
   let firstStep = true;
   let recycleTimer = 0;
 
-  function pickSpawn(px, pz) {
-    for (let attempt = 0; attempt < 26; attempt += 1) {
+  function pickSpawn(playerX, playerZ) {
+    for (let attempt = 0; attempt < SPAWN_ATTEMPTS; attempt += 1) {
       const axis = random() < 0.5 ? 0 : 1;
       const line = Math.round((random() * 2 - 1) * LIMIT);
       const dir = random() < 0.5 ? 1 : -1;
-      const coord = (random() * 2 - 1) * 165;
+      const coord = (random() * 2 - 1) * SPAWN_COORD_RANGE;
       const x = axis === 0 ? coord : laneCoord(line, 1, dir);
       const z = axis === 0 ? laneCoord(line, 0, dir) : coord;
-      if (Math.abs(x) > 190 || Math.abs(z) > 190) continue;
-      if (Math.abs(coord - Math.round(coord / BLOCK) * BLOCK) < 7) continue; // not in the junction
-      const d = Math.hypot(x - px, z - pz);
-      if (d < SPAWN_MIN || d > SPAWN_MAX) continue;
+      if (Math.abs(x) > SPAWN_EDGE_LIMIT || Math.abs(z) > SPAWN_EDGE_LIMIT) continue;
+      if (Math.abs(coord - Math.round(coord / BLOCK) * BLOCK) < JUNCTION_CLEARANCE) continue; // not in the junction
+      const distance = Math.hypot(x - playerX, z - playerZ);
+      if (distance < SPAWN_MIN || distance > SPAWN_MAX) continue;
       let clear = true;
-      for (let i = 0; i < cars.length; i += 1) {
-        const other = cars[i].root.position;
-        if (Math.hypot(other.x - x, other.z - z) < 13) { clear = false; break; }
+      for (let index = 0; index < cars.length; index += 1) {
+        const other = cars[index].root.position;
+        if (Math.hypot(other.x - x, other.z - z) < SPAWN_CAR_SPACING) { clear = false; break; }
       }
       if (!clear) continue;
       return { axis, dir, line, coord, x, z };
@@ -225,18 +294,18 @@ export function createTraffic(scene, city) {
     return null;
   }
 
-  function spawn(px, pz) {
-    const spot = pickSpawn(px, pz);
+  function spawn(playerX, playerZ) {
+    const spot = pickSpawn(playerX, playerZ);
     if (!spot) return null;
     const profile = PROFILES[Math.floor(random() * PROFILES.length)];
     const roll = random();
-    const type = roll < 0.05 ? 'police' : TYPES[Math.floor(random() * TYPES.length)];
+    const type = roll < POLICE_SPAWN_CHANCE ? 'police' : TYPES[Math.floor(random() * TYPES.length)];
     const color = type === 'taxi' || type === 'police' ? undefined : PAINTS[Math.floor(random() * PAINTS.length)];
     const car = makeTrafficCar(scene, type, spot.x, spot.z, headingFor(spot.axis, spot.dir), color);
     car.traffic = {
       axis: spot.axis, dir: spot.dir, line: spot.line, nextNode: 0,
-      target: { x: 0, z: 0 }, cruise: profile.cruise * (type === 'truck' ? 0.8 : type === 'sports' ? 1.15 : 1),
-      accel: profile.accel, brake: profile.brake, blocked: 0, hornCooldown: 2, lastDist: 999, resume: false,
+      target: { x: 0, z: 0 }, cruise: profile.cruise * (type === 'truck' ? TRUCK_SPEED_FACTOR : type === 'sports' ? SPORTS_SPEED_FACTOR : 1),
+      accel: profile.accel, brake: profile.brake, blocked: 0, hornCooldown: INITIAL_HORN_COOLDOWN, lastDist: FAR_DISTANCE, resume: false,
     };
     place(car, spot.axis, spot.dir, spot.line, spot.coord);
     cars.push(car);
@@ -248,145 +317,145 @@ export function createTraffic(scene, city) {
     const audio = typeof window !== 'undefined' && window.SOLARA ? window.SOLARA.audio : null;
     if (!audio || typeof audio.horn !== 'function') return;
     const now = traffic.time;
-    if (now - (traffic.lastHonk || -9) < 0.9) return;
+    if (now - (traffic.lastHonk || HORN_NEVER) < HONK_MIN_GAP) return;
     traffic.lastHonk = now;
     audio.horn();
   }
 
-  function step(dt, playerPos, player) {
-    if (!(dt > 0)) return;
-    traffic.time += dt;
-    const px = playerPos ? playerPos.x : 0;
-    const pz = playerPos ? playerPos.z : 0;
+  function step(delta, playerPos, player) {
+    if (!(delta > 0)) return;
+    traffic.time += delta;
+    const playerX = playerPos ? playerPos.x : 0;
+    const playerZ = playerPos ? playerPos.z : 0;
     const carInUse = player && player.car ? player.car : null;
-    const light0 = cityLight(traffic.city, 0, traffic.time) || ownLight(0, traffic.time);
-    const light1 = cityLight(traffic.city, 1, traffic.time) || ownLight(1, traffic.time);
-    const stop0 = light0 === 'red';
-    const stop1 = light1 === 'red';
-    const yellow0 = light0 === 'yellow';
-    const yellow1 = light1 === 'yellow';
+    const lightAxis0 = cityLight(traffic.city, 0, traffic.time) || ownLight(0, traffic.time);
+    const lightAxis1 = cityLight(traffic.city, 1, traffic.time) || ownLight(1, traffic.time);
+    const redAxis0 = lightAxis0 === 'red';
+    const redAxis1 = lightAxis1 === 'red';
+    const yellowAxis0 = lightAxis0 === 'yellow';
+    const yellowAxis1 = lightAxis1 === 'yellow';
 
     if (firstStep) {
       // The player may have been placed after the traffic was built.
       firstStep = false;
-      for (let i = 0; i < cars.length; i += 1) {
-        if (Math.hypot(cars[i].root.position.x - px, cars[i].root.position.z - pz) < 22) {
-          const spot = pickSpawn(px, pz);
-          if (spot) place(cars[i], spot.axis, spot.dir, spot.line, spot.coord);
+      for (let index = 0; index < cars.length; index += 1) {
+        if (Math.hypot(cars[index].root.position.x - playerX, cars[index].root.position.z - playerZ) < PLAYER_NEAR_DISTANCE) {
+          const spot = pickSpawn(playerX, playerZ);
+          if (spot) place(cars[index], spot.axis, spot.dir, spot.line, spot.coord);
         }
       }
     }
 
-    for (let i = 0; i < cars.length; i += 1) {
-      const car = cars[i];
-      const t = car.traffic;
-      if (!t) continue;
-      if (car === carInUse) { t.resume = true; continue; }
-      if (t.resume) resumeLane(car);
+    for (let carIndex = 0; carIndex < cars.length; carIndex += 1) {
+      const car = cars[carIndex];
+      const trafficState = car.traffic;
+      if (!trafficState) continue;
+      if (car === carInUse) { trafficState.resume = true; continue; }
+      if (trafficState.resume) resumeLane(car);
 
       const pos = car.root.position;
-      const groupDistance = Math.hypot(pos.x - px, pos.z - pz);
-      if (groupDistance > DESPAWN || Math.abs(pos.x) > 205 || Math.abs(pos.z) > 205) {
-        const spot = pickSpawn(px, pz);
+      const groupDistance = Math.hypot(pos.x - playerX, pos.z - playerZ);
+      if (groupDistance > DESPAWN || Math.abs(pos.x) > MAP_EDGE_LIMIT || Math.abs(pos.z) > MAP_EDGE_LIMIT) {
+        const spot = pickSpawn(playerX, playerZ);
         if (spot) place(car, spot.axis, spot.dir, spot.line, spot.coord);
         continue;
       }
 
       const yaw = car.root.rotation.y;
-      const fx = Math.sin(yaw);
-      const fz = Math.cos(yaw);
-      const rx = fz;
-      const rz = -fx;
-      const toX = t.target.x - pos.x;
-      const toZ = t.target.z - pos.z;
-      const dist = Math.hypot(toX, toZ);
+      const forwardX = Math.sin(yaw);
+      const forwardZ = Math.cos(yaw);
+      const rightX = forwardZ;
+      const rightZ = -forwardX;
+      const toX = trafficState.target.x - pos.x;
+      const toZ = trafficState.target.z - pos.z;
+      const targetDistance = Math.hypot(toX, toZ);
 
-      if (dist < 3.4 || (dist > t.lastDist + 0.35 && t.lastDist < 11)) {
+      if (targetDistance < ARRIVE_DISTANCE || (targetDistance > trafficState.lastDist + OVERSHOOT_MARGIN && trafficState.lastDist < OVERSHOOT_WINDOW)) {
         advance(car, random);
-        t.lastDist = 999;
+        trafficState.lastDist = FAR_DISTANCE;
       } else {
-        t.lastDist = dist;
+        trafficState.lastDist = targetDistance;
       }
-      const desired = Math.atan2(t.target.x - pos.x, t.target.z - pos.z);
-      const diff = wrapAngle(desired - car.root.rotation.y);
+      const desired = Math.atan2(trafficState.target.x - pos.x, trafficState.target.z - pos.z);
+      const headingError = wrapAngle(desired - car.root.rotation.y);
       const speed = Math.max(0, car.speed || 0);
-      const maxTurn = (2.0 + Math.min(1.4, speed * 0.05)) * (0.55 + 0.45 * Math.min(1, speed / 5));
+      const maxTurn = (BASE_TURN_RATE + Math.min(SPEED_TURN_BONUS, speed * TURN_SPEED_FACTOR)) * (LOW_SPEED_TURN_FLOOR + LOW_SPEED_TURN_RANGE * Math.min(1, speed / TURN_SPEED_REF));
 
-      let targetSpeed = t.cruise;
-      if (Math.abs(diff) > 0.32) targetSpeed *= 0.46;
-      if (Math.abs(diff) > 0.9) targetSpeed = Math.min(targetSpeed, 5.5);
+      let targetSpeed = trafficState.cruise;
+      if (Math.abs(headingError) > CORNER_SLOW_ANGLE) targetSpeed *= CORNER_SLOW_FACTOR;
+      if (Math.abs(headingError) > SHARP_TURN_ANGLE) targetSpeed = Math.min(targetSpeed, SHARP_TURN_SPEED);
 
       // Lights: stop 6 units before the junction, unless already inside it.
-      const coord = t.axis === 0 ? pos.x : pos.z;
-      const ahead = (t.nextNode - coord) * t.dir;
-      const axisLight = t.axis === 0 ? stop0 : stop1;
-      const axisYellow = t.axis === 0 ? yellow0 : yellow1;
-      if (ahead > 0 && ahead < 11) {
-        const willStop = axisLight || (axisYellow && ahead > 6.5);
+      const coord = trafficState.axis === 0 ? pos.x : pos.z;
+      const ahead = (trafficState.nextNode - coord) * trafficState.dir;
+      const axisRed = trafficState.axis === 0 ? redAxis0 : redAxis1;
+      const axisYellow = trafficState.axis === 0 ? yellowAxis0 : yellowAxis1;
+      if (ahead > 0 && ahead < LIGHT_APPROACH_DIST) {
+        const willStop = axisRed || (axisYellow && ahead > YELLOW_STOP_DIST);
         if (willStop) {
-          targetSpeed = Math.min(targetSpeed, Math.max(0, (ahead - 6.2) * 1.5));
+          targetSpeed = Math.min(targetSpeed, Math.max(0, (ahead - STOP_LINE_OFFSET) * STOP_SPEED_SCALE));
         }
       }
 
       // The car ahead in this lane, and the player (on foot or driving).
       let gap = Infinity;
-      for (let j = 0; j < cars.length; j += 1) {
-        if (j === i) continue;
-        const other = cars[j].root.position;
-        const dx = other.x - pos.x;
-        const dz = other.z - pos.z;
-        const along = dx * fx + dz * fz;
-        if (along <= 0.2 || along > 17) continue;
-        if (Math.abs(dx * rx + dz * rz) > 2.9) continue;
-        const clearance = along - (car.length + cars[j].length) * 0.5 - TAILGATE;
+      for (let otherIndex = 0; otherIndex < cars.length; otherIndex += 1) {
+        if (otherIndex === carIndex) continue;
+        const other = cars[otherIndex].root.position;
+        const offsetX = other.x - pos.x;
+        const offsetZ = other.z - pos.z;
+        const along = offsetX * forwardX + offsetZ * forwardZ;
+        if (along <= AHEAD_EPSILON || along > FOLLOW_LOOKAHEAD) continue;
+        if (Math.abs(offsetX * rightX + offsetZ * rightZ) > LANE_HALF_WIDTH) continue;
+        const clearance = along - (car.length + cars[otherIndex].length) * 0.5 - TAILGATE;
         if (clearance < gap) gap = clearance;
       }
       if (carInUse && carInUse !== car) {
-        const dx = carInUse.root.position.x - pos.x;
-        const dz = carInUse.root.position.z - pos.z;
-        const along = dx * fx + dz * fz;
-        if (along > 0 && along < 15 && Math.abs(dx * rx + dz * rz) < 3.4) {
-          gap = Math.min(gap, along - 5.4);
+        const offsetX = carInUse.root.position.x - pos.x;
+        const offsetZ = carInUse.root.position.z - pos.z;
+        const along = offsetX * forwardX + offsetZ * forwardZ;
+        if (along > 0 && along < PLAYER_CAR_LOOKAHEAD && Math.abs(offsetX * rightX + offsetZ * rightZ) < PLAYER_CAR_HALF_WIDTH) {
+          gap = Math.min(gap, along - PLAYER_CAR_CLEARANCE);
         }
       } else if (!carInUse) {
-        const dx = px - pos.x;
-        const dz = pz - pos.z;
-        const along = dx * fx + dz * fz;
-        if (along > 0 && along < 13 && Math.abs(dx * rx + dz * rz) < 2.8) {
-          gap = Math.min(gap, along - 3.2);
+        const offsetX = playerX - pos.x;
+        const offsetZ = playerZ - pos.z;
+        const along = offsetX * forwardX + offsetZ * forwardZ;
+        if (along > 0 && along < PLAYER_FOOT_LOOKAHEAD && Math.abs(offsetX * rightX + offsetZ * rightZ) < PLAYER_FOOT_HALF_WIDTH) {
+          gap = Math.min(gap, along - PLAYER_FOOT_CLEARANCE);
         }
       }
-      if (gap < 22) targetSpeed = Math.min(targetSpeed, Math.max(0, (gap - 1) * 1.35));
+      if (gap < GAP_SLOW_RANGE) targetSpeed = Math.min(targetSpeed, Math.max(0, (gap - GAP_BUFFER) * GAP_SPEED_SCALE));
 
-      if (targetSpeed < 0.25 && speed < 0.9) t.blocked += dt;
-      else t.blocked = Math.max(0, t.blocked - dt * 2.2);
-      t.hornCooldown -= dt;
-      if (t.blocked > 1.4 && t.hornCooldown <= 0) {
-        t.hornCooldown = 3.5 + random() * 4;
+      if (targetSpeed < BLOCKED_SPEED_THRESHOLD && speed < BLOCKED_CREEP_SPEED) trafficState.blocked += delta;
+      else trafficState.blocked = Math.max(0, trafficState.blocked - delta * BLOCKED_DECAY_RATE);
+      trafficState.hornCooldown -= delta;
+      if (trafficState.blocked > HORN_BLOCKED_SECONDS && trafficState.hornCooldown <= 0) {
+        trafficState.hornCooldown = HORN_COOLDOWN_BASE + random() * HORN_COOLDOWN_RANDOM;
         honk();
       }
 
-      car.speed = speed + clamp(targetSpeed - speed, -t.brake * dt, t.accel * dt);
+      car.speed = speed + clamp(targetSpeed - speed, -trafficState.brake * delta, trafficState.accel * delta);
       if (car.speed < 0) car.speed = 0;
-      car.root.rotation.y = (car.root.rotation.y + clamp(diff, -maxTurn * dt, maxTurn * dt)) % (Math.PI * 2);
+      car.root.rotation.y = (car.root.rotation.y + clamp(headingError, -maxTurn * delta, maxTurn * delta)) % (Math.PI * 2);
       const heading = car.root.rotation.y;
       car.velocityX = Math.sin(heading) * car.speed;
       car.velocityZ = Math.cos(heading) * car.speed;
-      car.root.position.x += car.velocityX * dt;
-      car.root.position.z += car.velocityZ * dt;
-      car.root.position.y = 0.55;
-      car.steerInput = clamp(diff * 1.6, -1, 1);
+      car.root.position.x += car.velocityX * delta;
+      car.root.position.z += car.velocityZ * delta;
+      car.root.position.y = CAR_RIDE_HEIGHT;
+      car.steerInput = clamp(headingError * STEER_VISUAL_SCALE, -1, 1);
       car.lateralSpeed = 0;
-      car.braking = targetSpeed < speed - 0.2;
-      animateVehicle(car, dt);
+      car.braking = targetSpeed < speed - BRAKE_THRESHOLD;
+      animateVehicle(car, delta);
     }
 
     // Keep the cap, and top the street back up after crashes or hijacks.
-    recycleTimer -= dt;
+    recycleTimer -= delta;
     if (recycleTimer <= 0) {
-      recycleTimer = 0.6;
+      recycleTimer = RECYCLE_INTERVAL;
       while (cars.length < MAX_CARS) {
-        if (!spawn(px, pz)) break;
+        if (!spawn(playerX, playerZ)) break;
       }
     }
   }
