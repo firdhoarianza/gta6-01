@@ -1,0 +1,3 @@
+// Tracks the original five-part Low Tide story and small repeatable courier work.
+import {MISSIONS} from './config.js';
+export function createMissions(scene){let index=0,done=false;let marker=new THREE.Mesh(new THREE.TorusGeometry(3,.25,8,28),new THREE.MeshBasicMaterial({color:0x73f1cb}));marker.rotation.x=Math.PI/2;scene.add(marker);function place(){let a=[[-42,-42],[-60,-100],[15,20],[120,65],[115,-80]][Math.min(index,4)];marker.position.set(a[0],.45,a[1])}place();return {marker,get index(){return index},get done(){return done},current(){return MISSIONS[Math.min(index,4)]},advance(){if(index<5)index++;if(index>=5)done=true;place()},reset(){index=0;done=false;place()}};}

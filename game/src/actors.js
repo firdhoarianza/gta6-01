@@ -1,0 +1,3 @@
+// Populates moving civilian traffic and sidewalk crowds, with simple panic reactions.
+import {makeCar} from './vehicles.js';
+export function makeActors(scene){let cars=[],people=[];for(let i=0;i<18;i++){let car=makeCar(scene,-140+(i*53%280),-130+(i*79%260),[0x38a9a7,0xedb86c,0xd77968,0xe7e0ca][i%4]);car.root.rotation.y=(i%2)*Math.PI/2;cars.push(car)}for(let i=0;i<55;i++){let m=new THREE.Mesh(new THREE.CapsuleGeometry(.35,.85,3,6),new THREE.MeshStandardMaterial({color:[0x277c82,0xd67962,0xf3ce83,0xeee2ce][i%4]}));m.position.set(-140+(i*43%280),.85,-130+(i*71%270));scene.add(m);people.push({mesh:m,phase:i*.71,panic:0})}return {cars,people};}

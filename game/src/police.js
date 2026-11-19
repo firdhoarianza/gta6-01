@@ -1,0 +1,3 @@
+// Manages escalating wanted stars, dispatch barks, pursuing units and cooldown.
+import {makeCar} from './vehicles.js';
+export function createPolice(scene){let units=[];return {stars:0,clock:0,units,crime(n=1){this.stars=Math.min(5,this.stars+n);this.clock=22;},step(dt,target){if(this.stars){this.clock-=dt;if(this.clock<0)this.stars=Math.max(0,this.stars-1),this.clock=22;if(units.length<this.stars*2){let c=makeCar(scene,target.x+18+Math.random()*15,target.z+22+Math.random()*15,0xe5e1d4,true);units.push(c)}}for(let u of units){let dx=target.x-u.root.position.x,dz=target.z-u.root.position.z,ang=Math.atan2(dx,dz);u.root.rotation.y=ang;u.root.position.x+=Math.sin(ang)*dt*(3+this.stars);u.root.position.z+=Math.cos(ang)*dt*(3+this.stars)}}};}
